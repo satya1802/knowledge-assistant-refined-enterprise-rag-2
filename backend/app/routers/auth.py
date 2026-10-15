@@ -2,7 +2,7 @@
 
 POST /auth/login is implemented with session-cookie management and
 failed-login lockout.  Logout and me are implemented here; change-password
-remains a stub (see US-001-1 task scope).
+is implemented here too.
 
 ``get_current_user`` is the reusable session-validation dependency that
 every protected endpoint across the application should use: it reads the
@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -49,6 +50,7 @@ _LOCKOUT_MESSAGE = (
     "Account temporarily locked due to too many failed login attempts. Please try again later."
 )
 _UNAUTHORIZED = "Not authenticated"
+_WRONG_CURRENT_PASSWORD = "Current password is incorrect"
 
 # Module-level dependency singleton for the DB session so ruff's B008 doesn't
 # flag the default.
@@ -62,6 +64,11 @@ def _cookie_secure() -> bool:
     for HTTPS deployments.
     """
     return os.getenv("COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+
+
+def _hash_password(plaintext: str) -> str:
+    """Return a bcrypt hash of *plaintext*."""
+    return bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -290,11 +297,29 @@ async def me(current_user: User = _current_user_dependency) -> UserResponse:
     return UserResponse(id=current_user.id, email=current_user.email, role=current_user.role)
 
 
-# ---------------------------------------------------------------------------
-# Stubs — not implemented in this task (see task constraints).
-# ---------------------------------------------------------------------------
-
-
 @router.post("/change-password", response_model=MessageResponse)
-async def change_password(request: ChangePasswordRequest) -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = _current_user_dependency,
+    db: Session = _db_dependency,
+) -> MessageResponse:
+    """Change the authenticated user's password.
+
+    Requires a valid session cookie (via :func:`get_current_user`).  Verifies
+    the supplied current password against the stored hash; if it does not
+    match, returns ``400`` with a message indicating the current password is
+    incorrect.  On success, replaces the stored hash with a bcrypt hash of
+    the new password and returns a success message.
+    """
+    try:
+        current_ok = verify_password(request.current_password, current_user.password_hash)
+    except (ValueError, TypeError):
+        current_ok = False
+
+    if not current_ok:
+        raise HTTPException(status_code=400, detail=_WRONG_CURRENT_PASSWORD)
+
+    current_user.password_hash = _hash_password(request.new_password)
+    db.commit()
+
+    return MessageResponse(message="Password changed successfully")
