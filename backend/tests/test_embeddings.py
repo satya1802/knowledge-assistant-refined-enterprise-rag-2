@@ -142,9 +142,7 @@ def _get_chunks(doc_id: uuid_mod.UUID) -> list[Chunk]:
     with SessionLocal() as db:
         return list(
             db.execute(
-                select(Chunk)
-                .where(Chunk.document_id == doc_id)
-                .order_by(Chunk.chunk_index)
+                select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.chunk_index)
             ).scalars()
         )
 
@@ -195,9 +193,7 @@ class TestEmbeddingSuccess:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            chunk = db.execute(
-                select(Chunk).where(Chunk.id == self.chunk_ids[0])
-            ).scalar_one()
+            chunk = db.execute(select(Chunk).where(Chunk.id == self.chunk_ids[0])).scalar_one()
             assert chunk.embedding is not None
             assert len(chunk.embedding) == _DIM
 
@@ -262,9 +258,7 @@ class TestDocumentReadyOnSuccess:
         _set_gemini_api_key(present=True)
         _ensure_settings()
         self.user = _create_user("us013_ready@example.com")
-        self.doc_id, self.chunk_ids = _create_document_with_chunks(
-            self.user.id, ["alpha", "beta"]
-        )
+        self.doc_id, self.chunk_ids = _create_document_with_chunks(self.user.id, ["alpha", "beta"])
 
     def teardown_method(self) -> None:
         _cleanup_documents()

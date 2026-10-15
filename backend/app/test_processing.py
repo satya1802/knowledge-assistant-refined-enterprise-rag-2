@@ -220,9 +220,7 @@ class TestEmbeddingSuccess:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            chunk = db.execute(
-                select(Chunk).where(Chunk.id == self.chunk_ids[0])
-            ).scalar_one()
+            chunk = db.execute(select(Chunk).where(Chunk.id == self.chunk_ids[0])).scalar_one()
             assert chunk.embedding == fake_vec
 
     def test_uses_model_name_from_settings_at_runtime(self) -> None:
@@ -248,9 +246,7 @@ class TestDocumentReadyOnSuccess:
         _set_gemini_api_key(present=True)
         _ensure_settings()
         self.user = _create_user("us013_ready@example.com")
-        self.doc_id, self.chunk_ids = _create_document_with_chunks(
-            self.user.id, ["alpha", "beta"]
-        )
+        self.doc_id, self.chunk_ids = _create_document_with_chunks(self.user.id, ["alpha", "beta"])
 
     def teardown_method(self) -> None:
         _cleanup_documents()
@@ -265,9 +261,7 @@ class TestDocumentReadyOnSuccess:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Ready"
             assert doc.failure_reason is None
 
@@ -278,9 +272,7 @@ class TestDocumentReadyOnSuccess:
             generate_embeddings(doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
             assert doc.status == "Ready"
 
     def test_resumable_skips_already_embedded_chunks(self) -> None:
@@ -307,9 +299,7 @@ class TestDocumentReadyOnSuccess:
         assert mock_embed.call_count == 1
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Ready"
 
 
@@ -340,9 +330,7 @@ class TestEmbeddingFailure:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Failed"
             assert doc.failure_reason is not None
             assert "Quota exceeded" in doc.failure_reason
@@ -355,9 +343,7 @@ class TestEmbeddingFailure:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert isinstance(doc.failure_reason, str)
             assert len(doc.failure_reason) > 0
             assert "503" in doc.failure_reason or "Service" in doc.failure_reason
@@ -371,9 +357,7 @@ class TestEmbeddingFailure:
 
         with SessionLocal() as db:
             chunks = list(
-                db.execute(
-                    select(Chunk).where(Chunk.document_id == self.doc_id)
-                ).scalars()
+                db.execute(select(Chunk).where(Chunk.document_id == self.doc_id)).scalars()
             )
             assert len(chunks) == 2
 
@@ -392,9 +376,7 @@ class TestEmbeddingFailure:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Failed"
 
             chunks = list(
@@ -421,9 +403,7 @@ class TestEmbeddingFailure:
         assert mock_embed.call_count == 0
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Failed"
             assert doc.failure_reason is not None
             assert "GEMINI_API_KEY" in doc.failure_reason
@@ -436,9 +416,7 @@ class TestEmbeddingFailure:
 
         with SessionLocal() as db:
             chunks = list(
-                db.execute(
-                    select(Chunk).where(Chunk.document_id == self.doc_id)
-                ).scalars()
+                db.execute(select(Chunk).where(Chunk.document_id == self.doc_id)).scalars()
             )
             assert len(chunks) == 2
 
@@ -452,9 +430,7 @@ class TestEmbeddingFailure:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Failed"
             assert "API key not valid" in (doc.failure_reason or "")
 
@@ -466,9 +442,7 @@ class TestEmbeddingFailure:
                 generate_embeddings(self.doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == self.doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
             assert doc.status == "Failed"
             assert doc.failure_reason is not None
 
@@ -506,9 +480,7 @@ class TestEdgeCases:
                 generate_embeddings(doc_id, db)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_id)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
             assert doc.status == "Ready"
         assert mock_embed.call_count == 1
 

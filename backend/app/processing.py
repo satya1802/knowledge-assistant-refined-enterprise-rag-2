@@ -89,9 +89,7 @@ def generate_embeddings(document_id: uuid.UUID, db: Session) -> None:
     The function is independently callable and does not depend on the rq
     job, so it can be unit-tested directly.
     """
-    document = db.execute(
-        select(Document).where(Document.id == document_id)
-    ).scalar_one_or_none()
+    document = db.execute(select(Document).where(Document.id == document_id)).scalar_one_or_none()
 
     if document is None:
         logger.warning("generate_embeddings: document %s not found", document_id)
@@ -99,9 +97,7 @@ def generate_embeddings(document_id: uuid.UUID, db: Session) -> None:
 
     chunks = list(
         db.execute(
-            select(Chunk)
-            .where(Chunk.document_id == document_id)
-            .order_by(Chunk.chunk_index)
+            select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.chunk_index)
         ).scalars()
     )
 
@@ -128,9 +124,7 @@ def generate_embeddings(document_id: uuid.UUID, db: Session) -> None:
             "Set the GEMINI_API_KEY environment variable to generate embeddings."
         )
         db.commit()
-        logger.error(
-            "generate_embeddings: GEMINI_API_KEY missing for document %s", document_id
-        )
+        logger.error("generate_embeddings: GEMINI_API_KEY missing for document %s", document_id)
         return
 
     # --- Configure the SDK and embed each chunk that lacks an embedding ---
@@ -179,9 +173,7 @@ def generate_embeddings(document_id: uuid.UUID, db: Session) -> None:
         document.status = "Failed"
         document.failure_reason = reason
         db.commit()
-        logger.error(
-            "generate_embeddings: document %s marked Failed — %s", document_id, reason
-        )
+        logger.error("generate_embeddings: document %s marked Failed — %s", document_id, reason)
 
 
 def process_document(document_id: uuid.UUID, db: Session) -> None:
