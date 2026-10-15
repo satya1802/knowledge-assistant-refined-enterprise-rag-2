@@ -1,8 +1,14 @@
 """Auth router: login, logout, profile, and password management.
 
 POST /auth/login is implemented with session-cookie management and
-failed-login lockout.  Logout, me, and change-password remain stubs
-(see US-001-1 task scope).
+failed-login lockout.  Logout and me are implemented here; change-password
+remains a stub (see US-001-1 task scope).
+
+``get_current_user`` is the reusable session-validation dependency that
+every protected endpoint across the application should use: it reads the
+``session_id`` cookie, converts it to a ``uuid.UUID``, looks up the
+``Session`` row, verifies it has not expired, and returns the associated
+``User`` -- or raises ``401`` when any of those steps fail.
 """
 
 from __future__ import annotations
@@ -10,7 +16,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,11 +46,12 @@ LOCKOUT_DURATION = timedelta(minutes=15)
 
 _GENERIC_ERROR = "Invalid email or password"
 _LOCKOUT_MESSAGE = (
-    "Account temporarily locked due to too many failed login attempts. "
-    "Please try again later."
+    "Account temporarily locked due to too many failed login attempts. Please try again later."
 )
+_UNAUTHORIZED = "Not authenticated"
 
-# Module-level dependency singleton so ruff's B008 doesn't flag the default.
+# Module-level dependency singleton for the DB session so ruff's B008 doesn't
+# flag the default.
 _db_dependency = Depends(get_db)
 
 
@@ -55,6 +62,54 @@ def _cookie_secure() -> bool:
     for HTTPS deployments.
     """
     return os.getenv("COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+
+
+# ---------------------------------------------------------------------------
+# Session-validation dependency
+# ---------------------------------------------------------------------------
+
+
+def get_current_user(
+    session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    db: Session = _db_dependency,
+) -> User:
+    """Validate the session cookie and return the authenticated ``User``.
+
+    Reads the ``session_id`` cookie, converts it to a ``uuid.UUID`` via
+    :func:`SessionModel.lookup_id`, looks up the ``Session`` row, and verifies
+    it has not expired.  On any failure (missing cookie, malformed UUID, no
+    matching session, expired session) raises ``401 Unauthorized``.
+
+    All protected endpoints should depend on this to obtain the current user.
+    """
+    if not session_id:
+        raise HTTPException(status_code=401, detail=_UNAUTHORIZED)
+
+    try:
+        parsed_id = SessionModel.lookup_id(session_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail=_UNAUTHORIZED) from None
+
+    session = db.execute(
+        select(SessionModel).where(SessionModel.id == parsed_id)
+    ).scalar_one_or_none()
+
+    if session is None:
+        raise HTTPException(status_code=401, detail=_UNAUTHORIZED)
+
+    if session.expires_at <= datetime.now(UTC):
+        raise HTTPException(status_code=401, detail=_UNAUTHORIZED)
+
+    user = session.user
+    if user is None:
+        raise HTTPException(status_code=401, detail=_UNAUTHORIZED)
+
+    return user
+
+
+# Module-level singleton for the current-user dependency (defined after
+# get_current_user so the name is available).
+_current_user_dependency = Depends(get_current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +162,7 @@ def _count_recent_failures(email: str, db: Session) -> int:
     """Count failed attempts for *email* within the 15-minute lockout window."""
     cutoff = datetime.now(UTC) - LOCKOUT_WINDOW
     rows = db.execute(
-        select(LoginAttempt.id)
-        .where(
+        select(LoginAttempt.id).where(
             LoginAttempt.email == email,
             LoginAttempt.success.is_(False),
             LoginAttempt.attempted_at >= cutoff,
@@ -151,9 +205,7 @@ async def login(
 
     # --- Credential verification ---
     try:
-        password_ok = user is not None and verify_password(
-            request.password, user.password_hash
-        )
+        password_ok = user is not None and verify_password(request.password, user.password_hash)
     except (ValueError, TypeError):
         # Corrupted or malformed hash — treat as a failed login.
         password_ok = False
@@ -196,19 +248,51 @@ async def login(
     return UserResponse(id=user.id, email=user.email, role=user.role)
 
 
-# ---------------------------------------------------------------------------
-# Stubs — not implemented in this task (see task constraints).
-# ---------------------------------------------------------------------------
-
-
 @router.post("/logout", response_model=MessageResponse)
-async def logout() -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def logout(
+    request: Request,
+    response: Response,
+    current_user: User = _current_user_dependency,
+    db: Session = _db_dependency,
+) -> MessageResponse:
+    """Invalidate the current session server-side and clear the session cookie.
+
+    Requires a valid session cookie (via :func:`get_current_user`).  Deletes
+    the ``Session`` row from the database so the old cookie cannot be reused,
+    then clears the cookie from the browser.  Returns a success message.
+    """
+    session_id = request.cookies.get(COOKIE_NAME)
+    if session_id:
+        try:
+            parsed_id = SessionModel.lookup_id(session_id)
+            session = db.execute(
+                select(SessionModel).where(SessionModel.id == parsed_id)
+            ).scalar_one_or_none()
+            if session is not None:
+                db.delete(session)
+                db.commit()
+        except (ValueError, TypeError):
+            pass
+
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return MessageResponse(message="Logged out successfully")
 
 
 @router.get("/me", response_model=UserResponse)
-async def me() -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
+async def me(current_user: User = _current_user_dependency) -> UserResponse:
+    """Return the authenticated user's ``{id, email, role}``.
+
+    Requires a valid session cookie (via :func:`get_current_user`).  Reads
+    identity purely from the cookie — no request body is accepted.  Returns
+    ``401 Unauthorized`` when no session cookie is present or the session is
+    expired or invalid.
+    """
+    return UserResponse(id=current_user.id, email=current_user.email, role=current_user.role)
+
+
+# ---------------------------------------------------------------------------
+# Stubs — not implemented in this task (see task constraints).
+# ---------------------------------------------------------------------------
 
 
 @router.post("/change-password", response_model=MessageResponse)
