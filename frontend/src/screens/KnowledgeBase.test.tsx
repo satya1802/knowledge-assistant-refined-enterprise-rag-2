@@ -74,11 +74,12 @@ function setupDownloadStubs() {
   const createURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
   const revokeURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   let capturedAnchor: any;
-  const clickSpy = vi
-    .spyOn(HTMLAnchorElement.prototype, "click")
-    .mockImplementation(function (this: any) {
-      capturedAnchor = this;
-    });
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: any,
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    capturedAnchor = this;
+  });
   return {
     createURLSpy,
     revokeURLSpy,
@@ -90,7 +91,7 @@ function setupDownloadStubs() {
 function mockFetchSuccess(blob: Blob, disposition?: string) {
   const headers = new Headers();
   if (disposition) headers.set("Content-Disposition", disposition);
-  return vi.spyOn(global, "fetch").mockResolvedValueOnce({
+  return vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
     ok: true,
     status: 200,
     headers,
@@ -100,7 +101,7 @@ function mockFetchSuccess(blob: Blob, disposition?: string) {
 }
 
 function mockFetchError(status: number, body: any) {
-  return vi.spyOn(global, "fetch").mockResolvedValueOnce({
+  return vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
     ok: false,
     status,
     headers: new Headers(),
@@ -453,10 +454,9 @@ describe("KnowledgeBase screen — API wiring", () => {
     fireEvent.click(downloadBtn);
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "http://localhost:8000/documents/doc-dl/download",
-        { credentials: "include" },
-      );
+      expect(fetchSpy).toHaveBeenCalledWith("http://localhost:8000/documents/doc-dl/download", {
+        credentials: "include",
+      });
     });
 
     // Verify the browser download was triggered via a temporary anchor.
@@ -540,7 +540,7 @@ describe("KnowledgeBase screen — API wiring", () => {
       expect(screen.getByText("Network.pdf")).toBeInTheDocument();
     });
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("fetch failed"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fetch failed"));
 
     const downloadBtn = screen.getByLabelText("Download Network.pdf");
     fireEvent.click(downloadBtn);
