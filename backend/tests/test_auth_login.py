@@ -50,9 +50,9 @@ def _delete_user(email: str) -> None:
         user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
         if user is not None:
             db.delete(user)
-        attempts = db.execute(
-            select(LoginAttempt).where(LoginAttempt.email == email)
-        ).scalars().all()
+        attempts = (
+            db.execute(select(LoginAttempt).where(LoginAttempt.email == email)).scalars().all()
+        )
         for a in attempts:
             db.delete(a)
         db.commit()
@@ -74,9 +74,7 @@ def _age_out_attempts(email: str, minutes_ago: int = 20) -> None:
     old = datetime.now(UTC) - timedelta(minutes=minutes_ago)
     with SessionLocal() as db:
         attempts = (
-            db.execute(select(LoginAttempt).where(LoginAttempt.email == email))
-            .scalars()
-            .all()
+            db.execute(select(LoginAttempt).where(LoginAttempt.email == email)).scalars().all()
         )
         for a in attempts:
             a.attempted_at = old
@@ -131,9 +129,7 @@ class TestSuccessfulLogin:
 
             with SessionLocal() as db:
                 sessions = (
-                    db.execute(
-                        select(SessionModel).where(SessionModel.user_id == user.id)
-                    )
+                    db.execute(select(SessionModel).where(SessionModel.user_id == user.id))
                     .scalars()
                     .all()
                 )
@@ -177,9 +173,7 @@ class TestGenericCredentialError:
         email = "ac005_wrongpw@example.com"
         _create_user(email, "correct-password")
         try:
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": "wrong-password"}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": "wrong-password"})
 
             assert resp.status_code == 401
             assert resp.json()["detail"] == "Invalid email or password"
@@ -199,9 +193,7 @@ class TestGenericCredentialError:
         email = "ac005_compare@example.com"
         _create_user(email, "correct-password")
         try:
-            wrong_pw = client.post(
-                "/auth/login", json={"email": email, "password": "bad"}
-            )
+            wrong_pw = client.post("/auth/login", json={"email": email, "password": "bad"})
             wrong_email = client.post(
                 "/auth/login",
                 json={"email": "nonexistent@example.com", "password": "bad"},
@@ -291,16 +283,12 @@ class TestLockoutTrigger:
         try:
             # 5 failed attempts.
             for _ in range(5):
-                resp = client.post(
-                    "/auth/login", json={"email": email, "password": "wrong"}
-                )
+                resp = client.post("/auth/login", json={"email": email, "password": "wrong"})
                 assert resp.status_code == 401
                 assert resp.json()["detail"] == "Invalid email or password"
 
             # 6th attempt — should be locked, even with the correct password.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": password}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": password})
 
             assert resp.status_code == 423
             detail = resp.json()["detail"]
@@ -318,9 +306,7 @@ class TestLockoutTrigger:
                 client.post("/auth/login", json={"email": email, "password": "wrong"})
 
             # 6th attempt with wrong password — locked, not generic error.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": "also-wrong"}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": "also-wrong"})
 
             assert resp.status_code == 423
             assert resp.json()["detail"] != "Invalid email or password"
@@ -348,15 +334,11 @@ class TestLockoutTrigger:
         _create_user(email, password)
         try:
             for _ in range(4):
-                resp = client.post(
-                    "/auth/login", json={"email": email, "password": "wrong"}
-                )
+                resp = client.post("/auth/login", json={"email": email, "password": "wrong"})
                 assert resp.status_code == 401
 
             # 5th attempt with correct password should succeed.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": password}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": password})
             assert resp.status_code == 200
         finally:
             _delete_user(email)
@@ -366,24 +348,18 @@ class TestLockoutTrigger:
         email = "ac011_nouser@example.com"
         try:
             for _ in range(5):
-                resp = client.post(
-                    "/auth/login", json={"email": email, "password": "wrong"}
-                )
+                resp = client.post("/auth/login", json={"email": email, "password": "wrong"})
                 assert resp.status_code == 401
 
             # 6th attempt — should be locked.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": "wrong"}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": "wrong"})
             assert resp.status_code == 423
             assert resp.json()["detail"] != "Invalid email or password"
         finally:
             # Clean up login attempts for this email.
             with SessionLocal() as db:
                 attempts = (
-                    db.execute(
-                        select(LoginAttempt).where(LoginAttempt.email == email)
-                    )
+                    db.execute(select(LoginAttempt).where(LoginAttempt.email == email))
                     .scalars()
                     .all()
                 )
@@ -414,9 +390,7 @@ class TestLockoutExpiry:
             _set_locked_until(email, past)
 
             # Now login with correct password should succeed.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": password}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": password})
             assert resp.status_code == 200
             assert resp.json()["email"] == email
         finally:
@@ -442,9 +416,7 @@ class TestLockoutExpiry:
 
             # A failed attempt after expiry should NOT immediately re-lock
             # because the old attempts are now outside the 15-minute window.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": "wrong-again"}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": "wrong-again"})
             assert resp.status_code == 401
             assert resp.json()["detail"] == "Invalid email or password"
 
@@ -463,9 +435,7 @@ class TestLockoutExpiry:
                 client.post("/auth/login", json={"email": email, "password": "wrong"})
 
             # Verify locked.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": password}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": password})
             assert resp.status_code == 423
 
             # Expire the lockout (age out attempts + set locked_until to past).
@@ -474,9 +444,7 @@ class TestLockoutExpiry:
             _set_locked_until(email, past)
 
             # Should now succeed.
-            resp = client.post(
-                "/auth/login", json={"email": email, "password": password}
-            )
+            resp = client.post("/auth/login", json={"email": email, "password": password})
             assert resp.status_code == 200
         finally:
             _delete_user(email)
