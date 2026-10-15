@@ -174,8 +174,7 @@ export default function Screen() {
     draft && settings && draft.gemini_answer_model !== settings.gemini_answer_model;
   var embeddingChanged =
     draft && settings && draft.gemini_embedding_model !== settings.gemini_embedding_model;
-  var cookieChanged =
-    draft && settings && draft.cookie_secure_flag !== settings.cookie_secure_flag;
+  var cookieChanged = draft && settings && draft.cookie_secure_flag !== settings.cookie_secure_flag;
 
   var cardStyle = {
     borderRadius: brand.radius,
@@ -311,12 +310,16 @@ export default function Screen() {
           },
           "Only administrators can view and change application settings. If you need a model or threshold change, ask an administrator to update it from this page.",
         ),
-        React.createElement(Button, {
-          onClick: function () {
-            navigate("chat");
+        React.createElement(
+          Button,
+          {
+            onClick: function () {
+              navigate("chat");
+            },
+            style: { fontFamily: brand.fontBody },
           },
-          style: { fontFamily: brand.fontBody },
-        }, "Back to Chat"),
+          "Back to Chat",
+        ),
       ),
     );
   }
@@ -392,18 +395,22 @@ export default function Screen() {
           },
           loadError,
         ),
-        React.createElement("button", {
-          type: "button",
-          onClick: handleRetry,
-          className: "px-4 py-2 text-sm font-medium",
-          style: {
-            backgroundColor: "transparent",
-            color: brand.primaryColor,
-            border: "1px solid " + tint(brand.primaryColor, 0.3),
-            borderRadius: brand.radius,
-            cursor: "pointer",
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: handleRetry,
+            className: "px-4 py-2 text-sm font-medium",
+            style: {
+              backgroundColor: "transparent",
+              color: brand.primaryColor,
+              border: "1px solid " + tint(brand.primaryColor, 0.3),
+              borderRadius: brand.radius,
+              cursor: "pointer",
+            },
           },
-        }, "Try again"),
+          "Try again",
+        ),
       ),
     );
   }

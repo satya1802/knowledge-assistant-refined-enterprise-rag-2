@@ -257,9 +257,7 @@ describe("Settings screen — API wiring", () => {
     });
 
     // Mock the PATCH response.
-    mockedApiFetch.mockResolvedValueOnce(
-      makeSettings({ gemini_answer_model: "gemini-1.5-pro" }),
-    );
+    mockedApiFetch.mockResolvedValueOnce(makeSettings({ gemini_answer_model: "gemini-1.5-pro" }));
 
     fireEvent.click(screen.getByText("Save Settings"));
 
@@ -375,9 +373,7 @@ describe("Settings screen — API wiring", () => {
       expect(screen.getByText("Save Settings")).not.toBeDisabled();
     });
 
-    mockedApiFetch.mockResolvedValueOnce(
-      makeSettings({ cookie_secure_flag: false }),
-    );
+    mockedApiFetch.mockResolvedValueOnce(makeSettings({ cookie_secure_flag: false }));
 
     fireEvent.click(screen.getByText("Save Settings"));
 
