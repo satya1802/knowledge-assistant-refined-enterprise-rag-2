@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401 -- imported so the tables register before create_all
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
 from app.routers import (
     auth_router,
     chat_router,
@@ -21,6 +21,7 @@ from app.routers import (
     settings_router,
     users_router,
 )
+from app.seed import seed_admin
 from app.services import configured_services
 
 app = FastAPI(
@@ -60,6 +61,11 @@ app.include_router(settings_router)
 # The scaffold ships no migrations, so the tables are created from the models on
 # startup. Replace this with Alembic before anything holds data worth keeping.
 Base.metadata.create_all(bind=engine)
+
+# Seed the admin account after the tables exist. Idempotent: a restart leaves
+# an existing admin record unchanged -- no password reset, no duplicate.
+with SessionLocal() as _seed_session:
+    seed_admin(_seed_session)
 
 
 @app.get("/health")
