@@ -127,15 +127,11 @@ class TestCreateUserSuccess:
             )
 
             with SessionLocal() as db:
-                user = db.execute(
-                    select(User).where(User.email == new_email)
-                ).scalar_one()
+                user = db.execute(select(User).where(User.email == new_email)).scalar_one()
                 # Stored hash must not be the plaintext.
                 assert user.password_hash != new_pw
                 # Must be a valid bcrypt hash verifiable against the plaintext.
-                assert bcrypt.checkpw(
-                    new_pw.encode("utf-8"), user.password_hash.encode("utf-8")
-                )
+                assert bcrypt.checkpw(new_pw.encode("utf-8"), user.password_hash.encode("utf-8"))
         finally:
             _logout(session_id)
             _delete_user(new_email)
@@ -203,11 +199,7 @@ class TestCreateUserDuplicate:
             )
 
             with SessionLocal() as db:
-                users = (
-                    db.execute(select(User).where(User.email == dup_email))
-                    .scalars()
-                    .all()
-                )
+                users = db.execute(select(User).where(User.email == dup_email)).scalars().all()
                 assert len(users) == 1
         finally:
             _logout(session_id)
@@ -253,10 +245,7 @@ class TestCreateUserForbidden:
             )
 
             with SessionLocal() as db:
-                user = (
-                    db.execute(select(User).where(User.email == new_email))
-                    .scalar_one_or_none()
-                )
+                user = db.execute(select(User).where(User.email == new_email)).scalar_one_or_none()
                 assert user is None
         finally:
             _logout(session_id)
@@ -348,9 +337,7 @@ class TestListUsers:
             assert resp.status_code == 200
             # Ensure the actual bcrypt hash prefix never leaks.
             with SessionLocal() as db:
-                other = db.execute(
-                    select(User).where(User.email == other_email)
-                ).scalar_one()
+                other = db.execute(select(User).where(User.email == other_email)).scalar_one()
                 assert other.password_hash not in resp.text
         finally:
             _logout(session_id)
@@ -417,10 +404,7 @@ class TestCreateUserInvalidRole:
             )
 
             with SessionLocal() as db:
-                user = (
-                    db.execute(select(User).where(User.email == new_email))
-                    .scalar_one_or_none()
-                )
+                user = db.execute(select(User).where(User.email == new_email)).scalar_one_or_none()
                 assert user is None
         finally:
             _logout(session_id)

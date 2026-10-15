@@ -79,10 +79,7 @@ async def create_user(
         )
 
     # --- Email uniqueness (409 on duplicate) ---
-    existing = (
-        db.execute(select(User).where(User.email == request.email))
-        .scalar_one_or_none()
-    )
+    existing = db.execute(select(User).where(User.email == request.email)).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=409, detail="Email already registered")
 

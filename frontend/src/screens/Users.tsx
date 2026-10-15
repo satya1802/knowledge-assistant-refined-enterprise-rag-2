@@ -708,7 +708,8 @@ export default function Screen() {
                                 });
                             },
                             ref: emailInputRef,
-                            className: "w-full px-3 py-2 text-sm rounded-md outline-none transition-colors",
+                            className:
+                              "w-full px-3 py-2 text-sm rounded-md outline-none transition-colors",
                             style: {
                               border: "1px solid " + (errors.email ? "#b91c1c" : borderColor),
                               borderRadius: brand.radius,
@@ -761,7 +762,8 @@ export default function Screen() {
                                   return c;
                                 });
                             },
-                            className: "w-full px-3 py-2 text-sm rounded-md outline-none transition-colors",
+                            className:
+                              "w-full px-3 py-2 text-sm rounded-md outline-none transition-colors",
                             style: {
                               border: "1px solid " + (errors.password ? "#b91c1c" : borderColor),
                               borderRadius: brand.radius,
@@ -828,7 +830,11 @@ export default function Screen() {
                                 color: headingColor,
                               },
                             },
-                            React.createElement("option", { value: "Regular User" }, "Regular User"),
+                            React.createElement(
+                              "option",
+                              { value: "Regular User" },
+                              "Regular User",
+                            ),
                             React.createElement(
                               "option",
                               { value: "Administrator" },
@@ -1220,13 +1226,17 @@ export default function Screen() {
                               /* Created */
                               React.createElement(
                                 "td",
-                                { style: Object.assign({}, tdStyle, { color: brand.neutralColor }) },
+                                {
+                                  style: Object.assign({}, tdStyle, { color: brand.neutralColor }),
+                                },
                                 formatDate(u.created_at),
                               ),
                               /* Last updated */
                               React.createElement(
                                 "td",
-                                { style: Object.assign({}, tdStyle, { color: brand.neutralColor }) },
+                                {
+                                  style: Object.assign({}, tdStyle, { color: brand.neutralColor }),
+                                },
                                 formatDate(u.updated_at),
                               ),
                             );

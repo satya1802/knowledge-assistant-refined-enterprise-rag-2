@@ -181,9 +181,7 @@ describe("Users screen — API wiring", () => {
     });
 
     // Verify POST was called with the right JSON body.
-    const postCall = mockedApiFetch.mock.calls.find(
-      (call) => (call[1] as any)?.method === "POST",
-    );
+    const postCall = mockedApiFetch.mock.calls.find((call) => (call[1] as any)?.method === "POST");
     expect(postCall).toBeTruthy();
     expect(postCall![0]).toBe("/users");
     const body = JSON.parse((postCall![1] as any).body);
@@ -285,9 +283,7 @@ describe("Users screen — API wiring", () => {
       expect(screen.getByText("newadmin@company.com")).toBeInTheDocument();
     });
 
-    const postCall = mockedApiFetch.mock.calls.find(
-      (call) => (call[1] as any)?.method === "POST",
-    );
+    const postCall = mockedApiFetch.mock.calls.find((call) => (call[1] as any)?.method === "POST");
     const body = JSON.parse((postCall![1] as any).body);
     expect(body.role).toBe("Administrator");
   });
