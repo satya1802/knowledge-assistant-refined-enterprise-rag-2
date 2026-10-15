@@ -6,19 +6,17 @@ import * as UI from "@/lib/ui";
 import { Icons } from "@/lib/icons";
 import { brand } from "@/lib/brand";
 import { useNavigate } from "@/lib/navigate";
+import { apiFetch } from "@/lib/api";
 
 const { Button, Select, Switch } = UI;
 const { Settings, AlertCircle, CheckCircle } = Icons;
 
-const initialSettings = {
-  id: 1,
-  gemini_answer_model: "gemini-2.0-flash",
-  gemini_embedding_model: "text-embedding-004",
-  cosine_threshold: 0.62,
-  cookie_secure_flag: true,
-  updated_at: "2026-10-14T09:22:00Z",
-  updated_by: "satya.ganaraju@quorq.ai",
-};
+const SETTINGS_FIELDS = [
+  "gemini_answer_model",
+  "gemini_embedding_model",
+  "cosine_threshold",
+  "cookie_secure_flag",
+];
 
 const modelOptions = [
   { value: "gemini-2.0-flash", label: "gemini-2.0-flash — fast, low cost" },
@@ -38,29 +36,85 @@ const thresholdPresets = [
   { label: "Permissive (0.50)", value: 0.5, hint: "More matches, lower relevance" },
 ];
 
+function tint(hex, alpha) {
+  var r = parseInt(hex.slice(1, 3), 16);
+  var g = parseInt(hex.slice(3, 5), 16);
+  var b = parseInt(hex.slice(5, 7), 16);
+  return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")";
+}
+
 export default function Screen() {
   const navigate = useNavigate();
-  const [settings, setSettings] = React.useState(initialSettings);
-  const [draft, setDraft] = React.useState(initialSettings);
+  const [settings, setSettings] = React.useState(null);
+  const [draft, setDraft] = React.useState(null);
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [savedAt, setSavedAt] = React.useState(null);
   const [error, setError] = React.useState(null);
-  const [isAdmin, setIsAdmin] = React.useState(true);
+
+  // API state
+  const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState(null);
+  const [forbidden, setForbidden] = React.useState(false);
+  const [retryCount, setRetryCount] = React.useState(0);
+
+  // ── Fetch settings from GET /settings on mount and on retry ───────────────
+  React.useEffect(
+    function () {
+      var cancelled = false;
+      async function load() {
+        setLoading(true);
+        setLoadError(null);
+        setForbidden(false);
+        try {
+          var data = await apiFetch("/settings");
+          if (!cancelled) {
+            setSettings(data);
+            setDraft(data);
+            setDirty(false);
+          }
+        } catch (err) {
+          if (cancelled) return;
+          if (err && err.status === 403) {
+            setForbidden(true);
+          } else {
+            setLoadError("Failed to load settings. Please check your connection and try again.");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      }
+      load();
+      return function () {
+        cancelled = true;
+      };
+    },
+    [retryCount],
+  );
+
+  function handleRetry() {
+    setRetryCount(function (c) {
+      return c + 1;
+    });
+  }
 
   function updateDraft(field, value) {
-    setDraft((prev) => {
-      const next = { ...prev, [field]: value };
-      const changed = Object.keys(next).some(
-        (k) => next[k] !== settings[k] && k !== "updated_at" && k !== "updated_by" && k !== "id",
-      );
+    setDraft(function (prev) {
+      var next = {};
+      Object.keys(prev).forEach(function (k) {
+        next[k] = prev[k];
+      });
+      next[field] = value;
+      var changed = SETTINGS_FIELDS.some(function (k) {
+        return next[k] !== settings[k];
+      });
       setDirty(changed);
       return next;
     });
     setError(null);
   }
 
-  function handleSave(e) {
+  async function handleSave(e) {
     e.preventDefault();
     if (draft.cosine_threshold < 0 || draft.cosine_threshold > 1) {
       setError("Cosine similarity threshold must be between 0.00 and 1.00.");
@@ -68,20 +122,32 @@ export default function Screen() {
     }
     setSaving(true);
     setError(null);
-    // Simulate async save
-    setTimeout(() => {
-      const now = new Date().toISOString();
-      const updated = {
-        ...draft,
-        updated_at: now,
-        updated_by: "satya.ganaraju@quorq.ai",
-      };
+    try {
+      var updated = await apiFetch("/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          gemini_answer_model: draft.gemini_answer_model,
+          gemini_embedding_model: draft.gemini_embedding_model,
+          cosine_threshold: draft.cosine_threshold,
+          cookie_secure_flag: draft.cookie_secure_flag,
+        }),
+      });
+      var now = new Date().toISOString();
       setSettings(updated);
       setDraft(updated);
       setDirty(false);
-      setSaving(false);
       setSavedAt(now);
-    }, 700);
+    } catch (err) {
+      if (err && err.status === 403) {
+        setForbidden(true);
+      } else if (err && err.body && err.body.detail && typeof err.body.detail === "string") {
+        setError(err.body.detail);
+      } else {
+        setError("Failed to save settings. Please check your connection and try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleReset() {
@@ -92,7 +158,7 @@ export default function Screen() {
 
   function formatTime(iso) {
     if (!iso) return "";
-    const d = new Date(iso);
+    var d = new Date(iso);
     return d.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
@@ -103,18 +169,20 @@ export default function Screen() {
     });
   }
 
-  const thresholdChanged = draft.cosine_threshold !== settings.cosine_threshold;
-  const modelChanged = draft.gemini_answer_model !== settings.gemini_answer_model;
-  const embeddingChanged = draft.gemini_embedding_model !== settings.gemini_embedding_model;
-  const cookieChanged = draft.cookie_secure_flag !== settings.cookie_secure_flag;
+  var thresholdChanged = draft && settings && draft.cosine_threshold !== settings.cosine_threshold;
+  var modelChanged =
+    draft && settings && draft.gemini_answer_model !== settings.gemini_answer_model;
+  var embeddingChanged =
+    draft && settings && draft.gemini_embedding_model !== settings.gemini_embedding_model;
+  var cookieChanged =
+    draft && settings && draft.cookie_secure_flag !== settings.cookie_secure_flag;
 
-  const accentStyle = { color: brand.primaryColor };
-  const cardStyle = {
+  var cardStyle = {
     borderRadius: brand.radius,
     backgroundColor: "#ffffff",
     border: "1px solid #e2e8f0",
   };
-  const labelStyle = {
+  var labelStyle = {
     fontFamily: brand.fontBody,
     fontSize: "0.8125rem",
     fontWeight: 600,
@@ -122,7 +190,7 @@ export default function Screen() {
     marginBottom: "0.25rem",
     display: "block",
   };
-  const helpStyle = {
+  var helpStyle = {
     fontFamily: brand.fontBody,
     fontSize: "0.75rem",
     color: brand.neutralColor,
@@ -130,44 +198,213 @@ export default function Screen() {
     lineHeight: 1.5,
   };
 
-  if (!isAdmin) {
-    return (
-      <div style={{ maxWidth: "640px", margin: "0 auto", paddingTop: "3rem" }}>
-        <div style={cardStyle} className="p-8 text-center">
-          <div className="flex items-center justify-center mb-4">
-            <span
-              className="inline-flex items-center justify-center"
-              style={{
+  var borderColor = tint(brand.neutralColor, 0.2);
+  var lightBorder = tint(brand.neutralColor, 0.12);
+  var headingColor = "#0f172a";
+
+  // ── Loading state ────────────────────────────────────────────────────────
+  if (loading) {
+    return React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: brand.fontBody,
+          color: headingColor,
+          maxWidth: "880px",
+          margin: "0 auto",
+        },
+      },
+      React.createElement("style", null, "@keyframes kaSpin { to { transform: rotate(360deg); } }"),
+      React.createElement(
+        "div",
+        { className: "flex items-start justify-between mb-6" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "h1",
+            {
+              className: "text-2xl font-bold",
+              style: {
+                fontFamily: brand.fontHeading,
+                color: "#0f172a",
+                letterSpacing: "-0.01em",
+              },
+            },
+            "Settings",
+          ),
+          React.createElement(
+            "p",
+            {
+              className: "text-sm mt-1",
+              style: { color: brand.neutralColor, fontFamily: brand.fontBody },
+            },
+            "Configure Gemini models, retrieval threshold, and session security for all users.",
+          ),
+        ),
+      ),
+      React.createElement(
+        "div",
+        {
+          className: "flex items-center justify-center",
+          style: { padding: "64px 24px" },
+        },
+        React.createElement("span", {
+          className: "inline-block w-6 h-6 border-2 rounded-full",
+          style: {
+            borderColor: tint(brand.neutralColor, 0.2),
+            borderTopColor: brand.primaryColor,
+            animation: "kaSpin 0.6s linear infinite",
+          },
+          "aria-hidden": true,
+        }),
+        React.createElement(
+          "span",
+          { className: "ml-3 text-sm", style: { color: brand.neutralColor } },
+          "Loading settings…",
+        ),
+      ),
+    );
+  }
+
+  // ── Forbidden (403) state — admin-only restricted view ────────────────────
+  if (forbidden) {
+    return React.createElement(
+      "div",
+      { style: { maxWidth: "640px", margin: "0 auto", paddingTop: "3rem" } },
+      React.createElement(
+        "div",
+        { className: "p-8 text-center", style: cardStyle },
+        React.createElement(
+          "div",
+          { className: "flex items-center justify-center mb-4" },
+          React.createElement(
+            "span",
+            {
+              className: "inline-flex items-center justify-center",
+              style: {
                 width: "48px",
                 height: "48px",
                 borderRadius: brand.radius,
                 backgroundColor: "#fef2f2",
-              }}
-            >
-              <AlertCircle
-                style={{ width: "24px", height: "24px", color: "#dc2626" }}
-                aria-hidden="true"
-              />
-            </span>
-          </div>
-          <h1
-            className="text-lg font-semibold mb-2"
-            style={{ fontFamily: brand.fontHeading, color: "#1e293b" }}
-          >
-            Settings are admin-only
-          </h1>
-          <p
-            className="text-sm mb-6"
-            style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
-          >
-            Only administrators can view and change application settings. If you need a model or
-            threshold change, ask an administrator to update it from this page.
-          </p>
-          <Button onClick={() => navigate("chat")} style={{ fontFamily: brand.fontBody }}>
-            Back to Chat
-          </Button>
-        </div>
-      </div>
+              },
+            },
+            React.createElement(AlertCircle, {
+              style: { width: "24px", height: "24px", color: "#dc2626" },
+              "aria-hidden": true,
+            }),
+          ),
+        ),
+        React.createElement(
+          "h1",
+          {
+            className: "text-lg font-semibold mb-2",
+            style: { fontFamily: brand.fontHeading, color: "#1e293b" },
+          },
+          "Settings are admin-only",
+        ),
+        React.createElement(
+          "p",
+          {
+            className: "text-sm mb-6",
+            style: { color: brand.neutralColor, fontFamily: brand.fontBody },
+          },
+          "Only administrators can view and change application settings. If you need a model or threshold change, ask an administrator to update it from this page.",
+        ),
+        React.createElement(Button, {
+          onClick: function () {
+            navigate("chat");
+          },
+          style: { fontFamily: brand.fontBody },
+        }, "Back to Chat"),
+      ),
+    );
+  }
+
+  // ── Network error state ──────────────────────────────────────────────────
+  if (loadError) {
+    return React.createElement(
+      "div",
+      {
+        style: {
+          fontFamily: brand.fontBody,
+          color: headingColor,
+          maxWidth: "880px",
+          margin: "0 auto",
+        },
+      },
+      React.createElement(
+        "div",
+        { className: "flex items-start justify-between mb-6" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "h1",
+            {
+              className: "text-2xl font-bold",
+              style: {
+                fontFamily: brand.fontHeading,
+                color: "#0f172a",
+                letterSpacing: "-0.01em",
+              },
+            },
+            "Settings",
+          ),
+          React.createElement(
+            "p",
+            {
+              className: "text-sm mt-1",
+              style: { color: brand.neutralColor, fontFamily: brand.fontBody },
+            },
+            "Configure Gemini models, retrieval threshold, and session security for all users.",
+          ),
+        ),
+      ),
+      React.createElement(
+        "div",
+        {
+          className: "rounded-lg text-center",
+          style: {
+            backgroundColor: "#fff",
+            border: "1px solid " + lightBorder,
+            padding: "48px 24px",
+          },
+        },
+        React.createElement(AlertCircle, {
+          size: 36,
+          "aria-hidden": true,
+          style: { color: "#b91c1c", marginBottom: "12px" },
+        }),
+        React.createElement(
+          "p",
+          {
+            className: "text-base font-semibold",
+            style: { color: headingColor, margin: "0 0 4px 0" },
+          },
+          "Failed to load settings",
+        ),
+        React.createElement(
+          "p",
+          {
+            className: "text-sm",
+            style: { color: brand.neutralColor, margin: "0 0 16px 0" },
+          },
+          loadError,
+        ),
+        React.createElement("button", {
+          type: "button",
+          onClick: handleRetry,
+          className: "px-4 py-2 text-sm font-medium",
+          style: {
+            backgroundColor: "transparent",
+            color: brand.primaryColor,
+            border: "1px solid " + tint(brand.primaryColor, 0.3),
+            borderRadius: brand.radius,
+            cursor: "pointer",
+          },
+        }, "Try again"),
+      ),
     );
   }
 
@@ -210,7 +447,7 @@ export default function Screen() {
         }}
       >
         <span className="text-xs" style={{ color: brand.neutralColor }}>
-          Last saved {formatTime(settings.updated_at)} by {settings.updated_by}
+          {savedAt ? "Last saved " + formatTime(savedAt) : "Settings loaded from server"}
         </span>
         {savedAt && !dirty && (
           <span
