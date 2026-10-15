@@ -34,7 +34,7 @@ from sqlalchemy import select
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import Document, User
-from app.routers.documents import MAX_FILE_SIZE, UPLOAD_DIR
+from app.routers.documents import UPLOAD_DIR
 from app.seed import seed_admin
 
 client = TestClient(app)
@@ -499,9 +499,7 @@ class TestListDocuments:
         """Inserting a row via ORM is reflected in the API response — the
         endpoint queries the DB, not an in-memory or hardcoded list."""
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             doc = Document(
                 filename="direct-insert.pdf",
                 file_type="PDF",
@@ -654,9 +652,7 @@ class TestStartupDoesNotDeleteDocuments:
         """Re-running Base.metadata.create_all (as main.py does on startup)
         must not delete existing document records."""
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             doc = Document(
                 filename="startup-survival.pdf",
                 file_type="PDF",
@@ -681,9 +677,7 @@ class TestStartupDoesNotDeleteDocuments:
         """Re-running seed_admin (as main.py does on startup) must not delete
         existing document records."""
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             doc = Document(
                 filename="seed-survival.txt",
                 file_type="TXT",
@@ -709,9 +703,7 @@ class TestStartupDoesNotDeleteDocuments:
         """Both create_all and seed_admin together (the full main.py startup
         sequence) must leave existing documents intact."""
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             doc = Document(
                 filename="full-startup.pdf",
                 file_type="PDF",

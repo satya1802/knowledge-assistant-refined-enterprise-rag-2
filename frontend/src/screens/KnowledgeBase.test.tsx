@@ -101,9 +101,7 @@ describe("KnowledgeBase screen — API wiring", () => {
     renderScreen();
 
     await waitFor(() => {
-      expect(
-        screen.getByText("No documents in the Knowledge Base yet"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("No documents in the Knowledge Base yet")).toBeInTheDocument();
     });
   });
 
@@ -205,9 +203,7 @@ describe("KnowledgeBase screen — API wiring", () => {
     fireEvent.change(fileInput, { target: { files: [testFile] } });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/is not a supported format/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/is not a supported format/)).toBeInTheDocument();
     });
     // The API was NOT called because client validation rejected it.
     expect(mockedApiUpload).not.toHaveBeenCalled();

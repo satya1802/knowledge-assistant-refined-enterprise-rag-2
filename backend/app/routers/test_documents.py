@@ -496,9 +496,9 @@ class TestListDocuments:
                 file_size=42,
                 file_path="/tmp/direct.pdf",
                 status="Processing",
-                uploaded_by=db.execute(
-                    select(User).where(User.email == self.admin_email)
-                ).scalar_one().id,
+                uploaded_by=db.execute(select(User).where(User.email == self.admin_email))
+                .scalar_one()
+                .id,
             )
             db.add(doc)
             db.commit()
@@ -550,9 +550,7 @@ class TestPersistenceAcrossRestart:
         new_client = TestClient(app)
         new_session = _login(self.admin_email, self.pw)
         try:
-            resp2 = new_client.get(
-                "/documents", cookies={"session_id": new_session}
-            )
+            resp2 = new_client.get("/documents", cookies={"session_id": new_session})
             assert resp2.status_code == 200
             items = resp2.json()
             assert any(i["id"] == str(doc_id) for i in items)

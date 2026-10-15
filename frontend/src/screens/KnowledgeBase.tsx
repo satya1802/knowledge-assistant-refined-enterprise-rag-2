@@ -161,8 +161,7 @@ export default function Screen() {
     const allowedTypes = ["PDF", "DOCX", "TXT", "MD"];
     if (!allowedTypes.includes(ext)) {
       setUploadError(
-        file.name +
-          " is not a supported format. Only PDF, DOCX, TXT, and MD files are accepted.",
+        file.name + " is not a supported format. Only PDF, DOCX, TXT, and MD files are accepted.",
       );
       return;
     }
@@ -261,7 +260,11 @@ export default function Screen() {
       setDocuments((prev) =>
         prev.map((d) =>
           d.id === docId
-            ? { ...d, status: prevDoc ? prevDoc.status : d.status, failure_reason: prevDoc ? prevDoc.failure_reason : null }
+            ? {
+                ...d,
+                status: prevDoc ? prevDoc.status : d.status,
+                failure_reason: prevDoc ? prevDoc.failure_reason : null,
+              }
             : d,
         ),
       );
