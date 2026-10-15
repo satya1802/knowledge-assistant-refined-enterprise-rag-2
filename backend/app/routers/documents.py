@@ -1,7 +1,9 @@
 """Documents router: upload, list, inspect, download, delete, and reindex.
 
 ``POST /documents`` and ``GET /documents`` are implemented in US-009-1.
-Every other route remains a 501 stub until its development ticket lands.
+``GET /documents/{id}`` and ``GET /documents/{id}/download`` are implemented
+in US-017-1.  Every other route remains a 501 stub until its development
+ticket lands.
 
 Upload flow
 -----------
@@ -25,6 +27,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -65,6 +68,15 @@ _SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".md": "MD",
 }
 
+# MIME content types keyed by the normalised ``Document.file_type`` value.
+# Used to set ``Content-Type`` on download responses.
+_CONTENT_TYPES: dict[str, str] = {
+    "PDF": "application/pdf",
+    "DOCX": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "TXT": "text/plain",
+    "MD": "text/markdown",
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,6 +87,15 @@ def _require_admin(current_user: User) -> None:
     """Raise ``403`` unless *current_user* is an Administrator."""
     if current_user.role != "Administrator":
         raise HTTPException(status_code=403, detail="Administrator access required")
+
+
+def _content_type_for(document: Document) -> str:
+    """Return the MIME content type for a document based on its file type.
+
+    Falls back to ``application/octet-stream`` for unknown types so the
+    download is never sent without a content type.
+    """
+    return _CONTENT_TYPES.get(document.file_type, "application/octet-stream")
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +202,71 @@ async def list_documents(
     ]
 
 
+@router.get("/{document_id}", response_model=DocumentDetail)
+async def get_document(
+    document_id: uuid.UUID,
+    db: Session = _db_dependency,
+    current_user: User = _current_user_dependency,
+) -> DocumentDetail:
+    """Return full metadata for a single document (any authenticated user).
+
+    Includes filename, file type, file size, status, failure reason (if any),
+    creation and last-updated timestamps (AC-048).  Returns 404 when the
+    document does not exist (AC-049).
+    """
+    document = db.execute(
+        select(Document).where(Document.id == document_id)
+    ).scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return DocumentDetail(
+        id=document.id,
+        filename=document.filename,
+        file_type=document.file_type,
+        file_size=document.file_size,
+        status=document.status,
+        failure_reason=document.failure_reason,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
+
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: uuid.UUID,
+    db: Session = _db_dependency,
+    current_user: User = _current_user_dependency,
+) -> FileResponse:
+    """Stream the original uploaded file (any authenticated user).
+
+    Returns the file as a ``FileResponse`` with the correct filename and
+    content type in the ``Content-Disposition`` attachment header (AC-050).
+    When the DB record exists but the file is missing from disk, returns a
+    clear JSON error indicating the file is missing from storage (AC-051).
+    """
+    document = db.execute(
+        select(Document).where(Document.id == document_id)
+    ).scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = Path(document.file_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="The original file is missing from storage",
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=_content_type_for(document),
+        filename=document.filename,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stubs -- 501 until their development tickets land
 # ---------------------------------------------------------------------------
@@ -188,16 +274,6 @@ async def list_documents(
 
 @router.get("/stats", response_model=DocumentStats)
 async def document_stats() -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@router.get("/{document_id}", response_model=DocumentDetail)
-async def get_document(document_id: uuid.UUID) -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@router.get("/{document_id}/download")
-async def download_document(document_id: uuid.UUID) -> None:
     raise HTTPException(status_code=501, detail="Not implemented")
 
 

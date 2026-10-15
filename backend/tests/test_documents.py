@@ -728,3 +728,261 @@ class TestStartupDoesNotDeleteDocuments:
             assert doc.filename == "full-startup.pdf"
             count_after = len(db.execute(select(Document)).scalars().all())
             assert count_after == count_before
+# ---------------------------------------------------------------------------
+# US-017-1 — GET /documents/{id} and GET /documents/{id}/download
+# ---------------------------------------------------------------------------
+
+
+class TestGetDocumentDetail:
+    """AC-048 / AC-049 — GET /documents/{id} full metadata and 404."""
+
+    def setup_method(self) -> None:
+        self.admin_email = "us017_admin_detail@example.com"
+        self.regular_email = "us017_regular_detail@example.com"
+        self.pw = "pw-123"
+        _create_user(self.admin_email, self.pw, role="Administrator")
+        _create_user(self.regular_email, self.pw, role="Regular User")
+        self.admin_session = _login(self.admin_email, self.pw)
+        self.regular_session = _login(self.regular_email, self.pw)
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _logout(self.admin_session)
+        _logout(self.regular_session)
+        _cleanup_documents()
+        _delete_user(self.regular_email)
+        _delete_user(self.admin_email)
+
+    def test_get_detail_returns_full_metadata(self) -> None:
+        """AC-048: existing document returns filename, type, size, upload
+        date, status, failure reason, created_at, updated_at."""
+        content = b"detail metadata content"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "detail.pdf")},
+            cookies={"session_id": self.admin_session},
+        )
+        assert resp.status_code == 200
+        doc_id = resp.json()["id"]
+
+        resp = client.get(f"/documents/{doc_id}", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == doc_id
+        assert body["filename"] == "detail.pdf"
+        assert body["file_type"] == "PDF"
+        assert body["file_size"] == len(content)
+        assert body["status"] == "Processing"
+        assert "failure_reason" in body
+        assert body["failure_reason"] is None
+        assert "created_at" in body
+        assert "updated_at" in body
+
+    def test_get_detail_includes_failure_reason_when_set(self) -> None:
+        """AC-048: failure_reason must be returned when it is set on the doc."""
+        content = b"failed doc content"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "failed.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        assert resp.status_code == 200
+        doc_id = _to_uuid(resp.json()["id"])
+
+        with SessionLocal() as db:
+            doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
+            doc.status = "Failed"
+            doc.failure_reason = "Extraction failed: unsupported encoding"
+            db.commit()
+
+        resp = client.get(f"/documents/{doc_id}", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "Failed"
+        assert body["failure_reason"] == "Extraction failed: unsupported encoding"
+
+    def test_get_detail_regular_user_can_access(self) -> None:
+        """Any authenticated user may call GET /documents/{id}."""
+        content = b"regular access detail"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "reg_access.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+
+        resp = client.get(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
+        assert resp.status_code == 200
+        assert resp.json()["filename"] == "reg_access.txt"
+
+    def test_get_detail_nonexistent_id_returns_404(self) -> None:
+        """AC-049: non-existent ID returns 404 Not Found."""
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.get(f"/documents/{fake_id}", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 404
+
+
+class TestDownloadDocument:
+    """AC-050 / AC-051 — GET /documents/{id}/download streaming and missing file."""
+
+    def setup_method(self) -> None:
+        self.admin_email = "us017_admin_download@example.com"
+        self.regular_email = "us017_regular_download@example.com"
+        self.pw = "pw-123"
+        _create_user(self.admin_email, self.pw, role="Administrator")
+        _create_user(self.regular_email, self.pw, role="Regular User")
+        self.admin_session = _login(self.admin_email, self.pw)
+        self.regular_session = _login(self.regular_email, self.pw)
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _logout(self.admin_session)
+        _logout(self.regular_session)
+        _cleanup_documents()
+        _delete_user(self.regular_email)
+        _delete_user(self.admin_email)
+
+    def test_download_streams_original_file(self) -> None:
+        """AC-050: download streams the original file content."""
+        content = b"download me please"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "download.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        assert resp.status_code == 200
+        doc_id = resp.json()["id"]
+
+        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 200, resp.text
+        assert resp.content == content
+
+    def test_download_content_disposition_has_filename(self) -> None:
+        """AC-050: Content-Disposition attachment header includes the filename."""
+        content = b"disposition check"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "disposition.pdf")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+
+        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        assert "attachment" in cd
+        assert "disposition.pdf" in cd
+
+    def test_download_correct_content_type(self) -> None:
+        """AC-050: content type derived from file_type/extension."""
+        cases = [
+            ("doc.pdf", "application/pdf"),
+            ("doc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ("doc.txt", "text/plain"),
+            ("doc.md", "text/markdown"),
+        ]
+        for filename, expected_ct in cases:
+            content = b"content for " + filename.encode()
+            resp = client.post(
+                "/documents",
+                files={"file": _make_file(content, filename)},
+                cookies={"session_id": self.admin_session},
+            )
+            assert resp.status_code == 200, resp.text
+            doc_id = resp.json()["id"]
+
+            resp = client.get(
+                f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session}
+            )
+            assert resp.status_code == 200, f"failed for {filename}"
+            ct = resp.headers.get("content-type", "")
+            assert ct.split(";")[0].strip() == expected_ct, (
+                f"content-type for {filename}: got {ct!r}, expected {expected_ct!r}"
+            )
+
+    def test_download_regular_user_can_access(self) -> None:
+        """Any authenticated user may download documents."""
+        content = b"regular download content"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "reg_dl.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+
+        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.regular_session})
+        assert resp.status_code == 200
+        assert resp.content == content
+
+    def test_download_nonexistent_id_returns_404(self) -> None:
+        """Non-existent document ID returns 404."""
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.get(f"/documents/{fake_id}/download", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 404
+
+    def test_download_file_missing_from_disk_returns_error(self) -> None:
+        """AC-051: DB record exists but file missing from disk → clear error."""
+        content = b"will be deleted from disk"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "ghost.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        assert resp.status_code == 200
+        doc_id = _to_uuid(resp.json()["id"])
+
+        # Remove the file from disk but keep the DB record.
+        with SessionLocal() as db:
+            doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
+            file_path = Path(doc.file_path)
+        assert file_path.exists()
+        file_path.unlink()
+        assert not file_path.exists()
+
+        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 404
+        detail = resp.json()["detail"].lower()
+        assert "missing" in detail
+
+    def test_download_file_missing_error_message_is_clear(self) -> None:
+        """AC-051: error message explicitly says the file is missing from storage."""
+        content = b"ghost 2"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "ghost2.md")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = _to_uuid(resp.json()["id"])
+
+        with SessionLocal() as db:
+            doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
+            Path(doc.file_path).unlink()
+
+        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        assert resp.status_code == 404
+        assert "missing" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# US-017-1 — unauthenticated access to GET /documents/{id} and download
+# ---------------------------------------------------------------------------
+
+
+class TestGetDownloadUnauthenticated:
+    """Both new endpoints require authentication via session cookie."""
+
+    def setup_method(self) -> None:
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _cleanup_documents()
+
+    def test_get_detail_unauthenticated_returns_401(self) -> None:
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.get(f"/documents/{fake_id}")
+        assert resp.status_code == 401
+
+    def test_download_unauthenticated_returns_401(self) -> None:
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.get(f"/documents/{fake_id}/download")
+        assert resp.status_code == 401

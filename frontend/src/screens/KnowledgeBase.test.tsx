@@ -51,6 +51,64 @@ function renderScreen() {
   );
 }
 
+// ── Download mock helpers ───────────────────────────────────────────────────
+// jsdom does not implement URL.createObjectURL, and the download flow needs
+// an anchor click. These helpers stub the relevant APIs for download tests.
+function setupDownloadStubs() {
+  // jsdom does not define URL.createObjectURL, so we must define it
+  // ourselves before we can spy on it.
+  if (!URL.createObjectURL) {
+    Object.defineProperty(URL, "createObjectURL", {
+      value: vi.fn(() => "blob:mock-url"),
+      configurable: true,
+      writable: true,
+    });
+  }
+  if (!URL.revokeObjectURL) {
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: vi.fn(),
+      configurable: true,
+      writable: true,
+    });
+  }
+  const createURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
+  const revokeURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  let capturedAnchor: any;
+  const clickSpy = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: any) {
+      capturedAnchor = this;
+    });
+  return {
+    createURLSpy,
+    revokeURLSpy,
+    clickSpy,
+    getCapturedAnchor: () => capturedAnchor,
+  };
+}
+
+function mockFetchSuccess(blob: Blob, disposition?: string) {
+  const headers = new Headers();
+  if (disposition) headers.set("Content-Disposition", disposition);
+  return vi.spyOn(global, "fetch").mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    headers,
+    blob: () => Promise.resolve(blob),
+    json: () => Promise.resolve({}),
+  } as any);
+}
+
+function mockFetchError(status: number, body: any) {
+  return vi.spyOn(global, "fetch").mockResolvedValueOnce({
+    ok: false,
+    status,
+    headers: new Headers(),
+    blob: () => Promise.resolve(new Blob()),
+    json: () => Promise.resolve(body),
+  } as any);
+}
+
 describe("KnowledgeBase screen — API wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -376,5 +434,133 @@ describe("KnowledgeBase screen — API wiring", () => {
     expect(screen.getAllByText("Processing").length).toBeGreaterThan(0);
     // And it should NOT have become Ready.
     expect(screen.queryByText("Ready-Doc.pdf")).not.toBeInTheDocument();
+  });
+
+  // ── Download (GET /documents/{id}/download) — success ──────────────────────
+  it("calls GET /documents/{id}/download with session credentials when the download button is clicked", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-dl", filename: "Policy.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Policy.pdf")).toBeInTheDocument();
+    });
+
+    const mockBlob = new Blob(["file content"], { type: "application/pdf" });
+    const fetchSpy = mockFetchSuccess(mockBlob, 'attachment; filename="Policy.pdf"');
+    const stubs = setupDownloadStubs();
+
+    const downloadBtn = screen.getByLabelText("Download Policy.pdf");
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "http://localhost:8000/documents/doc-dl/download",
+        { credentials: "include" },
+      );
+    });
+
+    // Verify the browser download was triggered via a temporary anchor.
+    await waitFor(() => {
+      expect(stubs.clickSpy).toHaveBeenCalled();
+    });
+    expect(stubs.createURLSpy).toHaveBeenCalledWith(mockBlob);
+  });
+
+  // ── Download — filename retention ───────────────────────────────────────────
+  it("uses the original filename from the document record for the downloaded file", async () => {
+    mockedApiFetch.mockResolvedValueOnce([
+      makeDoc({ id: "doc-fn", filename: "Annual-Report-2026.pdf" }),
+    ]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Annual-Report-2026.pdf")).toBeInTheDocument();
+    });
+
+    const mockBlob = new Blob(["content"], { type: "application/pdf" });
+    // No Content-Disposition header — should fall back to doc.filename.
+    mockFetchSuccess(mockBlob);
+    const stubs = setupDownloadStubs();
+
+    const downloadBtn = screen.getByLabelText("Download Annual-Report-2026.pdf");
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(stubs.getCapturedAnchor()).toBeTruthy();
+    });
+    expect(stubs.getCapturedAnchor().download).toBe("Annual-Report-2026.pdf");
+  });
+
+  it("uses the filename from Content-Disposition when provided by the server", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-cd", filename: "original.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("original.pdf")).toBeInTheDocument();
+    });
+
+    const mockBlob = new Blob(["content"], { type: "application/pdf" });
+    mockFetchSuccess(mockBlob, 'attachment; filename="renamed-by-server.pdf"');
+    const stubs = setupDownloadStubs();
+
+    const downloadBtn = screen.getByLabelText("Download original.pdf");
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(stubs.getCapturedAnchor()).toBeTruthy();
+    });
+    expect(stubs.getCapturedAnchor().download).toBe("renamed-by-server.pdf");
+  });
+
+  // ── Download — error (file missing from storage) ───────────────────────────
+  it("displays a user-visible error message when the server returns an error for download", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-err", filename: "Missing.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Missing.pdf")).toBeInTheDocument();
+    });
+
+    mockFetchError(404, { detail: "File not found in storage" });
+
+    const downloadBtn = screen.getByLabelText("Download Missing.pdf");
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("File not found in storage")).toBeInTheDocument();
+    });
+  });
+
+  // ── Download — network error ───────────────────────────────────────────────
+  it("displays a network error message when download fails to reach the server", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-net", filename: "Network.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Network.pdf")).toBeInTheDocument();
+    });
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("fetch failed"));
+
+    const downloadBtn = screen.getByLabelText("Download Network.pdf");
+    fireEvent.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not reach the server to download/)).toBeInTheDocument();
+    });
+  });
+
+  // ── Download — aria-label and button styling preserved ─────────────────────
+  it("preserves the aria-label on the download button", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-aria", filename: "Audit.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Audit.pdf")).toBeInTheDocument();
+    });
+
+    const downloadBtn = screen.getByLabelText("Download Audit.pdf");
+    expect(downloadBtn).toBeInTheDocument();
+    expect(downloadBtn.tagName).toBe("BUTTON");
   });
 });

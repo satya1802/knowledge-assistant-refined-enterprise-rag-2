@@ -6,7 +6,7 @@ import * as UI from "@/lib/ui";
 import { Icons } from "@/lib/icons";
 import { brand } from "@/lib/brand";
 import { useNavigate } from "@/lib/navigate";
-import { apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { apiFetch, apiUpload, ApiError, API_BASE_URL } from "@/lib/api";
 
 const { Button, Input, Select, Table, THead, TBody, TR, TH, TD, Stat } = UI;
 const { Search, Check, User, FileText, Trash, Edit, Filter, Download, Upload, AlertCircle } = Icons;
@@ -48,6 +48,30 @@ function extractApiMessage(err, fallback) {
   return fallback;
 }
 
+// Parse the filename from a Content-Disposition header. Returns null when
+// the header is absent or doesn't contain a filename token. Handles the
+// RFC 5987 extended form (filename*=UTF-8''encoded), quoted, and unquoted
+// forms.
+function parseFilenameFromDisposition(disposition) {
+  if (!disposition) return null;
+  // RFC 5987 extended: filename*=UTF-8''encoded-name
+  var starMatch = disposition.match(/filename\*=UTF-8''([^;\s]+)/i);
+  if (starMatch) {
+    try {
+      return decodeURIComponent(starMatch[1]);
+    } catch (e) {
+      return starMatch[1];
+    }
+  }
+  // Quoted: filename="name.pdf"
+  var quotedMatch = disposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch) return quotedMatch[1];
+  // Unquoted: filename=name.pdf
+  var unquotedMatch = disposition.match(/filename=([^;\s]+)/i);
+  if (unquotedMatch) return unquotedMatch[1];
+  return null;
+}
+
 export default function Screen() {
   const navigate = useNavigate();
   const brand = {
@@ -83,6 +107,8 @@ export default function Screen() {
   const [isDragging, setIsDragging] = React.useState(false);
   const [retryingId, setRetryingId] = React.useState(null);
   const [retryCount, setRetryCount] = React.useState(0);
+  const [downloadError, setDownloadError] = React.useState(null);
+  const [downloadingId, setDownloadingId] = React.useState(null);
 
   // ── Fetch documents from GET /documents on mount and on retry ────────────
   React.useEffect(
@@ -276,6 +302,68 @@ export default function Screen() {
       );
     } finally {
       setRetryingId(null);
+    }
+  }
+
+  // Download a document's original file via GET /documents/{id}/download.
+  // The response is a file stream (Content-Disposition: attachment). We
+  // request it as a blob, then trigger a programmatic download via a
+  // temporary anchor element with a blob URL. Visible to all authenticated
+  // users (admin and non-admin), matching the backend contract.
+  async function handleDownload(doc) {
+    setDownloadError(null);
+    setDownloadingId(doc.id);
+    try {
+      var response = await fetch(
+        API_BASE_URL + "/documents/" + doc.id + "/download",
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        var body;
+        try {
+          body = await response.json();
+        } catch (e) {
+          body = undefined;
+        }
+        throw new ApiError(
+          "GET /documents/" + doc.id + "/download failed: " + response.status,
+          response.status,
+          body,
+        );
+      }
+      var blob = await response.blob();
+      // Prefer the filename from Content-Disposition; fall back to the
+      // document record's filename so the downloaded file retains its
+      // original name.
+      var filename =
+        parseFilenameFromDisposition(response.headers.get("Content-Disposition")) ||
+        doc.filename;
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err instanceof ApiError || (err && err.status)) {
+        setDownloadError(
+          extractApiMessage(
+            err,
+            "Download failed. The file could not be retrieved. Please try again.",
+          ),
+        );
+      } else {
+        // Network error — fetch never reached the server.
+        setDownloadError(
+          "Could not reach the server to download " +
+            doc.filename +
+            ". Please check your connection and try again.",
+        );
+      }
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -559,6 +647,34 @@ export default function Screen() {
       )
     : null;
 
+  // Download error (visible to all authenticated users)
+  const downloadErrorEl = downloadError
+    ? React.createElement(
+        "div",
+        {
+          style: {
+            marginBottom: "12px",
+            padding: "10px 14px",
+            borderRadius: brand.radius,
+            backgroundColor: "rgba(220, 38, 38, 0.06)",
+            border: "1px solid rgba(220, 38, 38, 0.2)",
+            fontSize: "13px",
+            color: "#dc2626",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "8px",
+          },
+          role: "alert",
+        },
+        React.createElement(Icons.AlertCircle, {
+          size: 16,
+          "aria-hidden": "true",
+          style: { flexShrink: 0, marginTop: "1px" },
+        }),
+        React.createElement("span", null, downloadError),
+      )
+    : null;
+
   // ── Loading state ────────────────────────────────────────────────────────
   const loadingView = React.createElement(
     "div",
@@ -745,13 +861,13 @@ export default function Screen() {
             { style: { textAlign: "left", whiteSpace: "nowrap" } },
             "Status",
           ),
-          isAdmin
-            ? React.createElement(
-                UI.TH,
-                { style: { textAlign: "right", whiteSpace: "nowrap" } },
-                "Actions",
-              )
-            : null,
+          // Actions column is always rendered — download is available to all
+          // authenticated users (admin and non-admin).
+          React.createElement(
+            UI.TH,
+            { style: { textAlign: "right", whiteSpace: "nowrap" } },
+            "Actions",
+          ),
         ),
       ),
       React.createElement(
@@ -865,102 +981,118 @@ export default function Screen() {
                   : null,
               ),
             ),
-            // Actions (admin only)
-            isAdmin
-              ? React.createElement(
-                  UI.TD,
+            // Actions — download for all authenticated users; re-index &
+            // delete are admin-only.
+            React.createElement(
+              UI.TD,
+              {
+                style: { textAlign: "right", whiteSpace: "nowrap" },
+                onClick: (e) => e.stopPropagation(),
+              },
+              React.createElement(
+                "div",
+                {
+                  style: { display: "inline-flex", alignItems: "center", gap: "4px" },
+                },
+                // Download (all authenticated users)
+                React.createElement(
+                  "button",
                   {
-                    style: { textAlign: "right", whiteSpace: "nowrap" },
-                    onClick: (e) => e.stopPropagation(),
-                  },
-                  React.createElement(
-                    "div",
-                    {
-                      style: { display: "inline-flex", alignItems: "center", gap: "4px" },
+                    className: "ka-action-btn",
+                    onClick: () => handleDownload(doc),
+                    "aria-label": "Download " + doc.filename,
+                    title: "Download",
+                    disabled: downloadingId === doc.id,
+                    style: {
+                      border: "none",
+                      backgroundColor: "transparent",
+                      padding: "6px",
+                      borderRadius: "6px",
+                      cursor: downloadingId === doc.id ? "wait" : "pointer",
+                      color: brand.neutralColor,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      opacity: downloadingId === doc.id ? 0.5 : 1,
+                      transition: "background-color 0.15s, color 0.15s",
                     },
-                    // Download
-                    React.createElement(
+                    onMouseEnter: (e) => {
+                      if (downloadingId !== doc.id) {
+                        e.currentTarget.style.backgroundColor = "#f1f5f9";
+                        e.currentTarget.style.color = brand.primaryColor;
+                      }
+                    },
+                    onMouseLeave: (e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                      e.currentTarget.style.color = brand.neutralColor;
+                    },
+                  },
+                  downloadingId === doc.id
+                    ? React.createElement("span", {
+                        style: {
+                          width: "15px",
+                          height: "15px",
+                          border: "2px solid rgba(29,78,216,0.2)",
+                          borderTopColor: brand.primaryColor,
+                          borderRadius: "50%",
+                          display: "inline-block",
+                          animation: "kaPulse 0.8s linear infinite",
+                        },
+                        "aria-hidden": "true",
+                      })
+                    : React.createElement(Icons.Download, { size: 15, "aria-hidden": "true" }),
+                ),
+                // Re-index (admin only, only for failed or ready)
+                isAdmin && doc.status !== "Processing"
+                  ? React.createElement(
                       "button",
                       {
                         className: "ka-action-btn",
-                        onClick: () => {
-                          /* simulated download */
-                        },
-                        "aria-label": "Download " + doc.filename,
-                        title: "Download",
+                        onClick: () => handleReindex(doc.id),
+                        "aria-label": "Re-index " + doc.filename,
+                        title: "Re-index",
+                        disabled: retryingId === doc.id,
                         style: {
                           border: "none",
                           backgroundColor: "transparent",
                           padding: "6px",
                           borderRadius: "6px",
-                          cursor: "pointer",
+                          cursor: retryingId === doc.id ? "wait" : "pointer",
                           color: brand.neutralColor,
                           display: "inline-flex",
                           alignItems: "center",
+                          opacity: retryingId === doc.id ? 0.5 : 1,
                           transition: "background-color 0.15s, color 0.15s",
                         },
                         onMouseEnter: (e) => {
-                          e.currentTarget.style.backgroundColor = "#f1f5f9";
-                          e.currentTarget.style.color = brand.primaryColor;
+                          if (retryingId !== doc.id) {
+                            e.currentTarget.style.backgroundColor = "#f1f5f9";
+                            e.currentTarget.style.color = brand.primaryColor;
+                          }
                         },
                         onMouseLeave: (e) => {
                           e.currentTarget.style.backgroundColor = "transparent";
                           e.currentTarget.style.color = brand.neutralColor;
                         },
                       },
-                      React.createElement(Icons.Download, { size: 15, "aria-hidden": "true" }),
-                    ),
-                    // Re-index (only for failed or ready)
-                    doc.status !== "Processing"
-                      ? React.createElement(
-                          "button",
-                          {
-                            className: "ka-action-btn",
-                            onClick: () => handleReindex(doc.id),
-                            "aria-label": "Re-index " + doc.filename,
-                            title: "Re-index",
-                            disabled: retryingId === doc.id,
+                      retryingId === doc.id
+                        ? React.createElement("span", {
                             style: {
-                              border: "none",
-                              backgroundColor: "transparent",
-                              padding: "6px",
-                              borderRadius: "6px",
-                              cursor: retryingId === doc.id ? "wait" : "pointer",
-                              color: brand.neutralColor,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              opacity: retryingId === doc.id ? 0.5 : 1,
-                              transition: "background-color 0.15s, color 0.15s",
+                              width: "15px",
+                              height: "15px",
+                              border: "2px solid rgba(29,78,216,0.2)",
+                              borderTopColor: brand.primaryColor,
+                              borderRadius: "50%",
+                              display: "inline-block",
+                              animation: "kaPulse 0.8s linear infinite",
                             },
-                            onMouseEnter: (e) => {
-                              if (retryingId !== doc.id) {
-                                e.currentTarget.style.backgroundColor = "#f1f5f9";
-                                e.currentTarget.style.color = brand.primaryColor;
-                              }
-                            },
-                            onMouseLeave: (e) => {
-                              e.currentTarget.style.backgroundColor = "transparent";
-                              e.currentTarget.style.color = brand.neutralColor;
-                            },
-                          },
-                          retryingId === doc.id
-                            ? React.createElement("span", {
-                                style: {
-                                  width: "15px",
-                                  height: "15px",
-                                  border: "2px solid rgba(29,78,216,0.2)",
-                                  borderTopColor: brand.primaryColor,
-                                  borderRadius: "50%",
-                                  display: "inline-block",
-                                  animation: "kaPulse 0.8s linear infinite",
-                                },
-                                "aria-hidden": "true",
-                              })
-                            : React.createElement(Icons.Edit, { size: 15, "aria-hidden": "true" }),
-                        )
-                      : null,
-                    // Delete
-                    React.createElement(
+                            "aria-hidden": "true",
+                          })
+                        : React.createElement(Icons.Edit, { size: 15, "aria-hidden": "true" }),
+                    )
+                  : null,
+                // Delete (admin only)
+                isAdmin
+                  ? React.createElement(
                       "button",
                       {
                         className: "ka-action-btn",
@@ -988,10 +1120,10 @@ export default function Screen() {
                         },
                       },
                       React.createElement(Icons.Trash, { size: 15, "aria-hidden": "true" }),
-                    ),
-                  ),
-                )
-              : null,
+                    )
+                  : null,
+              ),
+            ),
           ),
         ),
       ),
@@ -1363,6 +1495,9 @@ export default function Screen() {
         filteredDocuments.length + " of " + documents.length + " documents",
       ),
     ),
+
+    // Download error (visible to all authenticated users)
+    downloadErrorEl,
 
     // Document table
     React.createElement(
