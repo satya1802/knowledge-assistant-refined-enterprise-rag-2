@@ -11,8 +11,7 @@
 // The generated screens do NOT use this yet -- they render seeded sample data, exactly as
 // they were approved. This is the seam to replace that with real calls, one screen at a
 // time.
-export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {

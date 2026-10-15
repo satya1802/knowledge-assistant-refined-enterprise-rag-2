@@ -17,7 +17,7 @@ const initialSettings = {
   cosine_threshold: 0.62,
   cookie_secure_flag: true,
   updated_at: "2026-10-14T09:22:00Z",
-  updated_by: "satya.ganaraju@quorq.ai"
+  updated_by: "satya.ganaraju@quorq.ai",
 };
 
 const modelOptions = [
@@ -35,7 +35,7 @@ const embeddingOptions = [
 const thresholdPresets = [
   { label: "Strict (0.75)", value: 0.75, hint: "Fewer but more precise matches" },
   { label: "Default (0.62)", value: 0.62, hint: "Balanced retrieval" },
-  { label: "Permissive (0.50)", value: 0.50, hint: "More matches, lower relevance" },
+  { label: "Permissive (0.50)", value: 0.5, hint: "More matches, lower relevance" },
 ];
 
 export default function Screen() {
@@ -49,10 +49,10 @@ export default function Screen() {
   const [isAdmin, setIsAdmin] = React.useState(true);
 
   function updateDraft(field, value) {
-    setDraft(prev => {
+    setDraft((prev) => {
       const next = { ...prev, [field]: value };
       const changed = Object.keys(next).some(
-        k => next[k] !== settings[k] && k !== "updated_at" && k !== "updated_by" && k !== "id"
+        (k) => next[k] !== settings[k] && k !== "updated_at" && k !== "updated_by" && k !== "id",
       );
       setDirty(changed);
       return next;
@@ -144,15 +144,24 @@ export default function Screen() {
                 backgroundColor: "#fef2f2",
               }}
             >
-              <AlertCircle style={{ width: "24px", height: "24px", color: "#dc2626" }} aria-hidden="true" />
+              <AlertCircle
+                style={{ width: "24px", height: "24px", color: "#dc2626" }}
+                aria-hidden="true"
+              />
             </span>
           </div>
-          <h1 className="text-lg font-semibold mb-2" style={{ fontFamily: brand.fontHeading, color: "#1e293b" }}>
+          <h1
+            className="text-lg font-semibold mb-2"
+            style={{ fontFamily: brand.fontHeading, color: "#1e293b" }}
+          >
             Settings are admin-only
           </h1>
-          <p className="text-sm mb-6" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
-            Only administrators can view and change application settings. If you need a model or threshold
-            change, ask an administrator to update it from this page.
+          <p
+            className="text-sm mb-6"
+            style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+          >
+            Only administrators can view and change application settings. If you need a model or
+            threshold change, ask an administrator to update it from this page.
           </p>
           <Button onClick={() => navigate("chat")} style={{ fontFamily: brand.fontBody }}>
             Back to Chat
@@ -163,7 +172,9 @@ export default function Screen() {
   }
 
   return (
-    <div style={{ fontFamily: brand.fontBody, color: "#1e293b", maxWidth: "880px", margin: "0 auto" }}>
+    <div
+      style={{ fontFamily: brand.fontBody, color: "#1e293b", maxWidth: "880px", margin: "0 auto" }}
+    >
       {/* Heading */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -173,11 +184,17 @@ export default function Screen() {
           >
             Settings
           </h1>
-          <p className="text-sm mt-1" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+          <p
+            className="text-sm mt-1"
+            style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+          >
             Configure Gemini models, retrieval threshold, and session security for all users.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+        <div
+          className="flex items-center gap-2 text-xs"
+          style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+        >
           <Settings style={{ width: "14px", height: "14px" }} aria-hidden="true" />
           <span>Administrator</span>
         </div>
@@ -205,10 +222,18 @@ export default function Screen() {
           </span>
         )}
         {dirty && (
-          <span className="flex items-center gap-1 text-xs font-medium" style={{ color: brand.neutralColor }}>
+          <span
+            className="flex items-center gap-1 text-xs font-medium"
+            style={{ color: brand.neutralColor }}
+          >
             <span
               className="inline-block"
-              style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: brand.primaryColor }}
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                backgroundColor: brand.primaryColor,
+              }}
               aria-hidden="true"
             />
             Unsaved changes
@@ -226,7 +251,10 @@ export default function Screen() {
             >
               Gemini Model Configuration
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+            <p
+              className="text-xs mt-0.5"
+              style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+            >
               Google Gemini is the sole AI provider for answer generation and embeddings.
             </p>
           </div>
@@ -251,10 +279,14 @@ export default function Screen() {
                 ))}
               </Select>
               <p style={helpStyle}>
-                Used for generating answers in chat. Changing this affects new responses immediately.
+                Used for generating answers in chat. Changing this affects new responses
+                immediately.
               </p>
               {modelChanged && (
-                <p className="text-xs mt-1 font-medium" style={{ color: brand.primaryColor, fontFamily: brand.fontBody }}>
+                <p
+                  className="text-xs mt-1 font-medium"
+                  style={{ color: brand.primaryColor, fontFamily: brand.fontBody }}
+                >
                   Pending: {settings.gemini_answer_model} → {draft.gemini_answer_model}
                 </p>
               )}
@@ -279,8 +311,8 @@ export default function Screen() {
                 ))}
               </Select>
               <p style={helpStyle}>
-                Generates 768-dimensional vectors for Knowledge Base chunks. Changing the embedding model
-                requires re-indexing existing documents.
+                Generates 768-dimensional vectors for Knowledge Base chunks. Changing the embedding
+                model requires re-indexing existing documents.
               </p>
               {embeddingChanged && (
                 <div
@@ -292,11 +324,18 @@ export default function Screen() {
                   }}
                 >
                   <AlertCircle
-                    style={{ width: "14px", height: "14px", color: "#d97706", marginTop: "1px", flexShrink: 0 }}
+                    style={{
+                      width: "14px",
+                      height: "14px",
+                      color: "#d97706",
+                      marginTop: "1px",
+                      flexShrink: 0,
+                    }}
                     aria-hidden="true"
                   />
                   <span className="text-xs" style={{ color: "#92400e" }}>
-                    After saving, re-index all documents from the Knowledge Base page so embeddings match the new model.
+                    After saving, re-index all documents from the Knowledge Base page so embeddings
+                    match the new model.
                   </span>
                 </div>
               )}
@@ -313,7 +352,10 @@ export default function Screen() {
             >
               Retrieval Configuration
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+            <p
+              className="text-xs mt-0.5"
+              style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+            >
               Controls how strictly the Knowledge Base matches questions to document chunks.
             </p>
           </div>
@@ -341,13 +383,20 @@ export default function Screen() {
                 }}
                 aria-describedby="threshold-help"
               />
-              <span className="text-sm" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+              <span
+                className="text-sm"
+                style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+              >
                 Chunks with similarity ≥ threshold are used for grounded answers.
               </span>
             </div>
 
             {/* Preset buttons */}
-            <div className="flex items-center gap-2 mb-3" role="group" aria-label="Threshold presets">
+            <div
+              className="flex items-center gap-2 mb-3"
+              role="group"
+              aria-label="Threshold presets"
+            >
               {thresholdPresets.map((preset) => {
                 const isExact = Math.abs(draft.cosine_threshold - preset.value) < 0.001;
                 return (
@@ -364,7 +413,8 @@ export default function Screen() {
                       backgroundColor: isExact ? brand.primaryColor : "#ffffff",
                       color: isExact ? "#ffffff" : "#475569",
                       cursor: "pointer",
-                      transition: "background-color 150ms ease, color 150ms ease, border-color 150ms ease",
+                      transition:
+                        "background-color 150ms ease, color 150ms ease, border-color 150ms ease",
                     }}
                     title={preset.hint}
                     aria-pressed={isExact}
@@ -383,25 +433,40 @@ export default function Screen() {
             >
               <div
                 style={{
-                  width: (draft.cosine_threshold * 100) + "%",
+                  width: draft.cosine_threshold * 100 + "%",
                   height: "100%",
                   backgroundColor: brand.primaryColor,
                   transition: "width 200ms ease",
                 }}
               />
             </div>
-            <div className="flex justify-between text-xs mt-1" style={{ color: brand.neutralColor, fontFamily: brand.fontBody, fontVariantNumeric: "tabular-nums" }}>
+            <div
+              className="flex justify-between text-xs mt-1"
+              style={{
+                color: brand.neutralColor,
+                fontFamily: brand.fontBody,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
               <span>0.00 — match everything</span>
               <span>1.00 — exact only</span>
             </div>
 
             <p id="threshold-help" style={{ ...helpStyle, marginTop: "0.75rem" }}>
-              Below this threshold, the system falls back to Gemini general knowledge with a
-              "Not from your documents" badge instead of returning low-relevance chunks.
+              Below this threshold, the system falls back to Gemini general knowledge with a "Not
+              from your documents" badge instead of returning low-relevance chunks.
             </p>
             {thresholdChanged && (
-              <p className="text-xs mt-1 font-medium" style={{ color: brand.primaryColor, fontFamily: brand.fontBody, fontVariantNumeric: "tabular-nums" }}>
-                Pending: {settings.cosine_threshold.toFixed(2)} → {draft.cosine_threshold.toFixed(2)}
+              <p
+                className="text-xs mt-1 font-medium"
+                style={{
+                  color: brand.primaryColor,
+                  fontFamily: brand.fontBody,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                Pending: {settings.cosine_threshold.toFixed(2)} →{" "}
+                {draft.cosine_threshold.toFixed(2)}
               </p>
             )}
           </div>
@@ -416,7 +481,10 @@ export default function Screen() {
             >
               Session Security
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+            <p
+              className="text-xs mt-0.5"
+              style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+            >
               Controls the Secure flag on HTTP-only session cookies.
             </p>
           </div>
@@ -427,12 +495,18 @@ export default function Screen() {
                 <label
                   htmlFor="cookie-secure"
                   className="text-sm font-semibold"
-                  style={{ fontFamily: brand.fontBody, color: "#334155", display: "block", marginBottom: "0.25rem" }}
+                  style={{
+                    fontFamily: brand.fontBody,
+                    color: "#334155",
+                    display: "block",
+                    marginBottom: "0.25rem",
+                  }}
                 >
                   Secure Cookie Flag
                 </label>
                 <p style={helpStyle}>
-                  When enabled, session cookies are sent only over HTTPS. Disable for local HTTP development.
+                  When enabled, session cookies are sent only over HTTPS. Disable for local HTTP
+                  development.
                   {cookieChanged && (
                     <span className="block mt-1 font-medium" style={{ color: brand.primaryColor }}>
                       Pending: {settings.cookie_secure_flag ? "Enabled" : "Disabled"} →{" "}
@@ -462,7 +536,16 @@ export default function Screen() {
             }}
             role="alert"
           >
-            <AlertCircle style={{ width: "16px", height: "16px", color: "#dc2626", flexShrink: 0, marginTop: "1px" }} aria-hidden="true" />
+            <AlertCircle
+              style={{
+                width: "16px",
+                height: "16px",
+                color: "#dc2626",
+                flexShrink: 0,
+                marginTop: "1px",
+              }}
+              aria-hidden="true"
+            />
             <span className="text-sm" style={{ color: "#991b1b", fontFamily: brand.fontBody }}>
               {error}
             </span>
@@ -511,12 +594,21 @@ export default function Screen() {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-4 text-xs" style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}>
+          <div
+            className="flex items-center gap-4 text-xs"
+            style={{ color: brand.neutralColor, fontFamily: brand.fontBody }}
+          >
             <button
               type="button"
               onClick={() => navigate("account")}
               className="hover:underline"
-              style={{ fontFamily: brand.fontBody, color: brand.neutralColor, background: "none", border: "none", cursor: "pointer" }}
+              style={{
+                fontFamily: brand.fontBody,
+                color: brand.neutralColor,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+              }}
             >
               Change my password
             </button>
@@ -525,7 +617,13 @@ export default function Screen() {
               type="button"
               onClick={() => navigate("knowledge-base")}
               className="hover:underline"
-              style={{ fontFamily: brand.fontBody, color: brand.neutralColor, background: "none", border: "none", cursor: "pointer" }}
+              style={{
+                fontFamily: brand.fontBody,
+                color: brand.neutralColor,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+              }}
             >
               Knowledge Base
             </button>

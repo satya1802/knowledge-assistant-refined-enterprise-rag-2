@@ -1,0 +1,87 @@
+{
+  "key": {
+    "app_design_id": "4ddec566-45d0-4362-8456-1d2f0b315cce",
+    "app_design_version": 1,
+    "architecture_document_id": "5dd268e7-c26d-4948-a03f-d030240ea678",
+    "architecture_version": 1
+  },
+  "outcome": "prepared",
+  "packages": [
+    {
+      "ecosystem": "pypi",
+      "installed_version": "0.0.32",
+      "name": "python-multipart",
+      "status": "installed",
+      "version": ""
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "6.20.1",
+      "name": "pypdf",
+      "status": "installed",
+      "version": ">=4.0"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "1.2.0",
+      "name": "python-docx",
+      "status": "installed",
+      "version": ">=1.1"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "0.3.13",
+      "name": "pytesseract",
+      "status": "installed",
+      "version": ">=0.3.10"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "1.17.0",
+      "name": "pdf2image",
+      "status": "installed",
+      "version": ">=1.17"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "0.8.6",
+      "name": "google-generativeai",
+      "status": "installed",
+      "version": ">=0.7"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "8.1.0",
+      "name": "redis",
+      "status": "installed",
+      "version": ">=5.0"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "2.12.0",
+      "name": "rq",
+      "status": "installed",
+      "version": ">=1.16"
+    },
+    {
+      "ecosystem": "pypi",
+      "installed_version": "5.0.0",
+      "name": "bcrypt",
+      "status": "installed",
+      "version": ">=4.0"
+    },
+    {
+      "ecosystem": "system",
+      "name": "tesseract-ocr",
+      "status": "image",
+      "version": ""
+    },
+    {
+      "ecosystem": "system",
+      "name": "poppler-utils",
+      "status": "image",
+      "version": ""
+    }
+  ],
+  "prepared_by_run": "2977dbc9-b55b-4f6b-9b67-fdcb3165715e"
+}

@@ -10,9 +10,27 @@ import { useNavigate } from "@/lib/navigate";
 const { Search, Check, X, User, Settings, Bell, FileText, AlertCircle, CheckCircle } = Icons;
 
 const SEED_USERS = [
-  { id: 1, email: "satya.ganaraju@quorq.ai", password: "admin@123", role: "Administrator", name: "Satya Ganaraju" },
-  { id: 2, email: "priya.sharma@quorq.ai", password: "quorq2026", role: "Regular User", name: "Priya Sharma" },
-  { id: 3, email: "arjun.mehta@quorq.ai", password: "arjun!kb", role: "Regular User", name: "Arjun Mehta" },
+  {
+    id: 1,
+    email: "satya.ganaraju@quorq.ai",
+    password: "admin@123",
+    role: "Administrator",
+    name: "Satya Ganaraju",
+  },
+  {
+    id: 2,
+    email: "priya.sharma@quorq.ai",
+    password: "quorq2026",
+    role: "Regular User",
+    name: "Priya Sharma",
+  },
+  {
+    id: 3,
+    email: "arjun.mehta@quorq.ai",
+    password: "arjun!kb",
+    role: "Regular User",
+    name: "Arjun Mehta",
+  },
 ];
 
 const LOCKOUT_THRESHOLD = 5;
@@ -51,21 +69,30 @@ export default function Screen() {
     }
     tick();
     const interval = setInterval(tick, 1000);
-    return function () { clearInterval(interval); };
+    return function () {
+      clearInterval(interval);
+    };
   }, [status, lockedUntil]);
 
   // Respect reduced motion
   const prefersReducedMotion = React.useMemo(function () {
-    return typeof window !== "undefined" &&
+    return (
+      typeof window !== "undefined" &&
       window.matchMedia &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
   }, []);
 
   function handleSubmit(e) {
     e.preventDefault();
 
     // If already locked for this email, block submission
-    if (lockedEmail && email.toLowerCase() === lockedEmail.toLowerCase() && lockedUntil && Date.now() < lockedUntil) {
+    if (
+      lockedEmail &&
+      email.toLowerCase() === lockedEmail.toLowerCase() &&
+      lockedUntil &&
+      Date.now() < lockedUntil
+    ) {
       setStatus("locked");
       return;
     }
@@ -106,10 +133,10 @@ export default function Screen() {
           setStatus("error");
           setErrorMessage(
             "Email or password is incorrect. " +
-            (LOCKOUT_THRESHOLD - newFailedCount) +
-            " attempt" +
-            ((LOCKOUT_THRESHOLD - newFailedCount) === 1 ? "" : "s") +
-            " remaining before this account is temporarily locked."
+              (LOCKOUT_THRESHOLD - newFailedCount) +
+              " attempt" +
+              (LOCKOUT_THRESHOLD - newFailedCount === 1 ? "" : "s") +
+              " remaining before this account is temporarily locked.",
           );
         }
       }
@@ -138,7 +165,10 @@ export default function Screen() {
   const isAdminEmail = email.trim().toLowerCase() === "satya.ganaraju@quorq.ai";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-8" style={{ backgroundColor: brand.backgroundColor, fontFamily: brand.fontBody }}>
+    <div
+      className="min-h-screen flex items-center justify-center px-4 py-8"
+      style={{ backgroundColor: brand.backgroundColor, fontFamily: brand.fontBody }}
+    >
       <div className="w-full max-w-md">
         {/* Brand header */}
         <div className="text-center mb-8">
@@ -309,7 +339,11 @@ export default function Screen() {
                   />
                   <button
                     type="button"
-                    onClick={function () { setShowPassword(function (v) { return !v; }); }}
+                    onClick={function () {
+                      setShowPassword(function (v) {
+                        return !v;
+                      });
+                    }}
                     disabled={status === "loading" || status === "locked"}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded"
                     style={{ color: brand.neutralColor }}
@@ -331,7 +365,9 @@ export default function Screen() {
                     id="login-remember"
                     type="checkbox"
                     checked={rememberEmail}
-                    onChange={function (e) { setRememberEmail(e.target.checked); }}
+                    onChange={function (e) {
+                      setRememberEmail(e.target.checked);
+                    }}
                     disabled={status === "loading" || status === "locked"}
                     className="w-4 h-4"
                     style={{ accentColor: brand.primaryColor }}
@@ -350,7 +386,8 @@ export default function Screen() {
                 style={{
                   backgroundColor: brand.primaryColor,
                   borderRadius: brand.radius,
-                  opacity: (status === "loading" || status === "locked" || status === "success") ? 0.6 : 1,
+                  opacity:
+                    status === "loading" || status === "locked" || status === "success" ? 0.6 : 1,
                   fontFamily: brand.fontBody,
                 }}
                 aria-busy={status === "loading"}
@@ -380,8 +417,14 @@ export default function Screen() {
 
           {/* Footer info */}
           <div className="px-5 pb-4 pt-1">
-            <div className="flex items-center gap-2 pt-3 border-t" style={{ borderColor: "#f1f5f9" }}>
-              <Icons.Settings style={{ width: 14, height: 14, color: brand.neutralColor }} aria-hidden="true" />
+            <div
+              className="flex items-center gap-2 pt-3 border-t"
+              style={{ borderColor: "#f1f5f9" }}
+            >
+              <Icons.Settings
+                style={{ width: 14, height: 14, color: brand.neutralColor }}
+                aria-hidden="true"
+              />
               <p className="text-xs" style={{ color: brand.neutralColor }}>
                 Accounts are provisioned by your administrator. No self-registration.
               </p>
@@ -392,33 +435,42 @@ export default function Screen() {
         {/* Security note + admin hint */}
         <div className="mt-5 space-y-3">
           {/* Attempt indicator */}
-          {failedAttempts > 0 && status === "idle" && lastFailedEmail === email.trim().toLowerCase() && (
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
-              style={{
-                backgroundColor: "#fffbeb",
-                border: "1px solid #fde68a",
-                color: "#92400e",
-                animation: prefersReducedMotion ? "none" : "kaSlideIn 0.2s ease",
-              }}
-              role="status"
-            >
-              <Icons.AlertCircle style={{ width: 14, height: 14, flexShrink: 0 }} aria-hidden="true" />
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                {remainingAttempts} of {LOCKOUT_THRESHOLD} attempts remaining before lockout.
-              </span>
-            </div>
-          )}
+          {failedAttempts > 0 &&
+            status === "idle" &&
+            lastFailedEmail === email.trim().toLowerCase() && (
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                style={{
+                  backgroundColor: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  color: "#92400e",
+                  animation: prefersReducedMotion ? "none" : "kaSlideIn 0.2s ease",
+                }}
+                role="status"
+              >
+                <Icons.AlertCircle
+                  style={{ width: 14, height: 14, flexShrink: 0 }}
+                  aria-hidden="true"
+                />
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {remainingAttempts} of {LOCKOUT_THRESHOLD} attempts remaining before lockout.
+                </span>
+              </div>
+            )}
 
           {/* Lockout policy info */}
           <div
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg"
             style={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0" }}
           >
-            <Icons.Bell style={{ width: 14, height: 14, color: brand.neutralColor, flexShrink: 0 }} aria-hidden="true" />
+            <Icons.Bell
+              style={{ width: 14, height: 14, color: brand.neutralColor, flexShrink: 0 }}
+              aria-hidden="true"
+            />
             <p className="text-xs leading-relaxed" style={{ color: brand.neutralColor }}>
               After {LOCKOUT_THRESHOLD} failed attempts, the account is locked for{" "}
-              <span style={{ fontWeight: 600 }}>{LOCKOUT_MINUTES} minutes</span> to protect against brute-force access.
+              <span style={{ fontWeight: 600 }}>{LOCKOUT_MINUTES} minutes</span> to protect against
+              brute-force access.
             </p>
           </div>
 
@@ -428,7 +480,10 @@ export default function Screen() {
             style={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0" }}
           >
             <div className="flex items-center gap-2">
-              <Icons.User style={{ width: 14, height: 14, color: brand.neutralColor, flexShrink: 0 }} aria-hidden="true" />
+              <Icons.User
+                style={{ width: 14, height: 14, color: brand.neutralColor, flexShrink: 0 }}
+                aria-hidden="true"
+              />
               <p className="text-xs" style={{ color: brand.neutralColor }}>
                 First-time admin login? Use the seeded credentials.
               </p>

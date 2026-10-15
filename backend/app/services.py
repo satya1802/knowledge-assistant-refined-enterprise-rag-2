@@ -9,6 +9,7 @@ import os
 
 SERVICES = {
     "redis-queue": "REDIS_URL",
+    "gemini-api": "GEMINI_API_KEY",
 }
 
 

@@ -20,7 +20,7 @@ def test_health_reports_ok() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert set(body["services"]) == {"redis-queue"}
+    assert set(body["services"]) == {"redis-queue", "gemini-api"}
 
 
 def test_the_openapi_document_builds() -> None:
@@ -29,4 +29,11 @@ def test_the_openapi_document_builds() -> None:
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
-    assert "/health" in response.json()["paths"]
+    paths = response.json()["paths"]
+    assert "/health" in paths
+    # A few representative endpoints from the approved API spec -- confirms the
+    # routers are wired in and their response models resolved.
+    assert "/auth/login" in paths
+    assert "/documents" in paths
+    assert "/chat" in paths
+    assert "/settings" in paths
