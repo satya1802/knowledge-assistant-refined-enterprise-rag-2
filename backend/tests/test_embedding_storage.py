@@ -260,9 +260,7 @@ class TestEmbeddingPersistedToDatabase:
 
         fresh = SessionLocal()
         try:
-            chunk = fresh.execute(
-                select(Chunk).where(Chunk.id == self.chunk_ids[0])
-            ).scalar_one()
+            chunk = fresh.execute(select(Chunk).where(Chunk.id == self.chunk_ids[0])).scalar_one()
             assert chunk.embedding is not None
             assert len(chunk.embedding) == _DIM
             assert list(chunk.embedding) == _fake_embedding(seed=7)
@@ -272,9 +270,7 @@ class TestEmbeddingPersistedToDatabase:
     def test_multiple_documents_embeddings_stored_separately(self) -> None:
         """Embeddings from two different documents are stored independently,
         each associated with the correct document and chunk IDs."""
-        doc_id_2, _chunk_ids_2 = _create_document_with_chunks(
-            self.user.id, ["second doc chunk"]
-        )
+        doc_id_2, _chunk_ids_2 = _create_document_with_chunks(self.user.id, ["second doc chunk"])
 
         try:
             with patch("app.processing.genai.embed_content") as mock_embed:
@@ -286,9 +282,7 @@ class TestEmbeddingPersistedToDatabase:
 
             with SessionLocal() as db:
                 chunks_1 = list(
-                    db.execute(
-                        select(Chunk).where(Chunk.document_id == self.doc_id)
-                    ).scalars()
+                    db.execute(select(Chunk).where(Chunk.document_id == self.doc_id)).scalars()
                 )
                 assert len(chunks_1) == 3
                 for c in chunks_1:
@@ -297,9 +291,7 @@ class TestEmbeddingPersistedToDatabase:
                     assert c.document_id == self.doc_id
 
                 chunks_2 = list(
-                    db.execute(
-                        select(Chunk).where(Chunk.document_id == doc_id_2)
-                    ).scalars()
+                    db.execute(select(Chunk).where(Chunk.document_id == doc_id_2)).scalars()
                 )
                 assert len(chunks_2) == 1
                 for c in chunks_2:
@@ -435,7 +427,7 @@ class TestEmbeddingsAvailableAfterRestart:
                 assert len(chunks) == 3
 
                 expected_seeds = [10, 20, 30]
-                for chunk, seed in zip(chunks, expected_seeds):
+                for chunk, seed in zip(chunks, expected_seeds, strict=False):
                     assert chunk.embedding is not None
                     assert len(chunk.embedding) == _DIM
                     assert list(chunk.embedding) == _fake_embedding(seed=seed)
@@ -454,9 +446,7 @@ class TestEmbeddingsAvailableAfterRestart:
 
         try:
             with new_session() as db:
-                doc = db.execute(
-                    select(Document).where(Document.id == self.doc_id)
-                ).scalar_one()
+                doc = db.execute(select(Document).where(Document.id == self.doc_id)).scalar_one()
                 assert doc.status == "Ready"
                 assert doc.failure_reason is None
         finally:
