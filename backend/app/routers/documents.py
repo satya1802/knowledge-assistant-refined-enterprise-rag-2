@@ -282,9 +282,7 @@ async def delete_document(
     """
     _require_admin(current_user)
 
-    document = db.execute(
-        select(Document).where(Document.id == document_id)
-    ).scalar_one_or_none()
+    document = db.execute(select(Document).where(Document.id == document_id)).scalar_one_or_none()
 
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -293,9 +291,9 @@ async def delete_document(
     # Citation has FKs to both documents and chunks with ondelete=CASCADE,
     # but SQLite does not enforce FK cascades by default, so we remove them
     # explicitly before deleting the document.
-    citations = db.execute(
-        select(Citation).where(Citation.document_id == document_id)
-    ).scalars().all()
+    citations = (
+        db.execute(select(Citation).where(Citation.document_id == document_id)).scalars().all()
+    )
     for citation in citations:
         db.delete(citation)
 

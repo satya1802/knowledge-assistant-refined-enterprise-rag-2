@@ -39,8 +39,8 @@ from sqlalchemy import select
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import (
-    Citation,
     Chunk,
+    Citation,
     Conversation,
     Document,
     Message,
@@ -1123,17 +1123,13 @@ class TestDeleteDocumentAdmin:
         doc_uuid = _to_uuid(doc_id)
 
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             admin_id = admin.id
 
         _create_chunks_and_citations(doc_uuid, admin_id)
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_uuid)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == doc_uuid)).scalar_one()
             file_path = Path(doc.file_path)
 
         return doc_id, file_path
@@ -1141,9 +1137,7 @@ class TestDeleteDocumentAdmin:
     def test_delete_returns_message_response(self) -> None:
         """AC-052: successful deletion returns MessageResponse JSON."""
         doc_id, _ = self._upload_doc_with_chunks_and_citations()
-        resp = client.delete(
-            f"/documents/{doc_id}", cookies={"session_id": self.session_id}
-        )
+        resp = client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["message"] == "Document deleted successfully"
@@ -1162,9 +1156,7 @@ class TestDeleteDocumentAdmin:
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_uuid)
-            ).scalar_one_or_none()
+            doc = db.execute(select(Document).where(Document.id == doc_uuid)).scalar_one_or_none()
             assert doc is None
 
     def test_delete_removes_chunks_and_embeddings(self) -> None:
@@ -1174,9 +1166,7 @@ class TestDeleteDocumentAdmin:
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
 
         with SessionLocal() as db:
-            chunks = db.execute(
-                select(Chunk).where(Chunk.document_id == doc_uuid)
-            ).scalars().all()
+            chunks = db.execute(select(Chunk).where(Chunk.document_id == doc_uuid)).scalars().all()
             assert len(chunks) == 0
 
     def test_delete_removes_citations(self) -> None:
@@ -1186,9 +1176,9 @@ class TestDeleteDocumentAdmin:
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
 
         with SessionLocal() as db:
-            citations = db.execute(
-                select(Citation).where(Citation.document_id == doc_uuid)
-            ).scalars().all()
+            citations = (
+                db.execute(select(Citation).where(Citation.document_id == doc_uuid)).scalars().all()
+            )
             assert len(citations) == 0
 
     def test_delete_excludes_from_get_documents(self) -> None:
@@ -1217,17 +1207,17 @@ class TestDeleteDocumentAdmin:
 
         # Verify chunks exist before deletion
         with SessionLocal() as db:
-            chunks_before = db.execute(
-                select(Chunk).where(Chunk.document_id == doc_uuid)
-            ).scalars().all()
+            chunks_before = (
+                db.execute(select(Chunk).where(Chunk.document_id == doc_uuid)).scalars().all()
+            )
             assert len(chunks_before) == 2
 
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
 
         with SessionLocal() as db:
-            chunks_after = db.execute(
-                select(Chunk).where(Chunk.document_id == doc_uuid)
-            ).scalars().all()
+            chunks_after = (
+                db.execute(select(Chunk).where(Chunk.document_id == doc_uuid)).scalars().all()
+            )
             assert len(chunks_after) == 0
 
     def test_delete_file_already_removed_from_disk(self) -> None:
@@ -1242,9 +1232,7 @@ class TestDeleteDocumentAdmin:
 
         doc_uuid = _to_uuid(doc_id)
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_uuid)
-            ).scalar_one_or_none()
+            doc = db.execute(select(Document).where(Document.id == doc_uuid)).scalar_one_or_none()
             assert doc is None
 
 
@@ -1278,9 +1266,7 @@ class TestDeleteDocumentNonAdmin:
         )
         doc_id = resp.json()["id"]
 
-        resp = client.delete(
-            f"/documents/{doc_id}", cookies={"session_id": self.regular_session}
-        )
+        resp = client.delete(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
         assert resp.status_code == 403
 
     def test_regular_user_delete_no_data_removed(self) -> None:
@@ -1297,17 +1283,13 @@ class TestDeleteDocumentNonAdmin:
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
 
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_uuid)
-            ).scalar_one_or_none()
+            doc = db.execute(select(Document).where(Document.id == doc_uuid)).scalar_one_or_none()
             assert doc is not None
             assert doc.filename == "protected2.txt"
 
         # File still on disk
         with SessionLocal() as db:
-            doc = db.execute(
-                select(Document).where(Document.id == doc_uuid)
-            ).scalar_one()
+            doc = db.execute(select(Document).where(Document.id == doc_uuid)).scalar_one()
             assert Path(doc.file_path).exists()
 
     def test_regular_user_delete_no_chunks_removed(self) -> None:
@@ -1322,18 +1304,14 @@ class TestDeleteDocumentNonAdmin:
         doc_uuid = _to_uuid(doc_id)
 
         with SessionLocal() as db:
-            admin = db.execute(
-                select(User).where(User.email == self.admin_email)
-            ).scalar_one()
+            admin = db.execute(select(User).where(User.email == self.admin_email)).scalar_one()
             admin_id = admin.id
         _create_chunks_and_citations(doc_uuid, admin_id)
 
         client.delete(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
 
         with SessionLocal() as db:
-            chunks = db.execute(
-                select(Chunk).where(Chunk.document_id == doc_uuid)
-            ).scalars().all()
+            chunks = db.execute(select(Chunk).where(Chunk.document_id == doc_uuid)).scalars().all()
             assert len(chunks) == 2
 
 
