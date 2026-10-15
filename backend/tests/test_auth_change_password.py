@@ -138,15 +138,11 @@ class TestChangePasswordSuccess:
             assert resp.status_code in (200, 204), resp.text
 
             # Old password no longer works.
-            old_resp = client.post(
-                "/auth/login", json={"email": email, "password": old_password}
-            )
+            old_resp = client.post("/auth/login", json={"email": email, "password": old_password})
             assert old_resp.status_code == 401
 
             # New password works.
-            new_resp = client.post(
-                "/auth/login", json={"email": email, "password": new_password}
-            )
+            new_resp = client.post("/auth/login", json={"email": email, "password": new_password})
             assert new_resp.status_code == 200
         finally:
             _delete_user(email)
