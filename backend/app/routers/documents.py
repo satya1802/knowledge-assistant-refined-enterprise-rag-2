@@ -2,8 +2,8 @@
 
 ``POST /documents`` and ``GET /documents`` are implemented in US-009-1.
 ``GET /documents/{id}`` and ``GET /documents/{id}/download`` are implemented
-in US-017-1.  Every other route remains a 501 stub until its development
-ticket lands.
+in US-017-1.  ``DELETE /documents/{id}`` is implemented in US-019-1.
+Every other route remains a 501 stub until its development ticket lands.
 
 Upload flow
 -----------
@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Document, User
+from app.models import Citation, Document, User
 from app.routers.auth import get_current_user
 from app.schemas import (
     DocumentDetail,
@@ -214,9 +214,7 @@ async def get_document(
     creation and last-updated timestamps (AC-048).  Returns 404 when the
     document does not exist (AC-049).
     """
-    document = db.execute(
-        select(Document).where(Document.id == document_id)
-    ).scalar_one_or_none()
+    document = db.execute(select(Document).where(Document.id == document_id)).scalar_one_or_none()
 
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -246,9 +244,7 @@ async def download_document(
     When the DB record exists but the file is missing from disk, returns a
     clear JSON error indicating the file is missing from storage (AC-051).
     """
-    document = db.execute(
-        select(Document).where(Document.id == document_id)
-    ).scalar_one_or_none()
+    document = db.execute(select(Document).where(Document.id == document_id)).scalar_one_or_none()
 
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -267,6 +263,58 @@ async def download_document(
     )
 
 
+@router.delete("/{document_id}", response_model=MessageResponse)
+async def delete_document(
+    document_id: uuid.UUID,
+    db: Session = _db_dependency,
+    current_user: User = _current_user_dependency,
+) -> MessageResponse:
+    """Delete a document and all associated data (admin only).
+
+    Removes the stored file from the filesystem (gracefully handling the case
+    where it is already gone), deletes the ``Document`` record, and cascades
+    cleanup to all chunks (via ORM ``cascade='all, delete-orphan'``) and
+    related citations (explicitly queried and deleted, since SQLite does not
+    enforce FK ``ON DELETE CASCADE`` at the database level by default).
+
+    Returns ``404`` when the document does not exist and ``403`` when a
+    non-admin user calls the endpoint (AC-052 through AC-055).
+    """
+    _require_admin(current_user)
+
+    document = db.execute(
+        select(Document).where(Document.id == document_id)
+    ).scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # --- Explicitly delete citations referencing this document ---
+    # Citation has FKs to both documents and chunks with ondelete=CASCADE,
+    # but SQLite does not enforce FK cascades by default, so we remove them
+    # explicitly before deleting the document.
+    citations = db.execute(
+        select(Citation).where(Citation.document_id == document_id)
+    ).scalars().all()
+    for citation in citations:
+        db.delete(citation)
+
+    # --- Capture file path before ORM deletion ---
+    file_path = Path(document.file_path)
+
+    # --- Delete document (ORM cascade='all, delete-orphan' removes chunks) ---
+    db.delete(document)
+    db.commit()
+
+    # --- Remove file from filesystem (graceful if already gone) ---
+    try:
+        file_path.unlink()
+    except FileNotFoundError:
+        pass
+
+    return MessageResponse(message="Document deleted successfully")
+
+
 # ---------------------------------------------------------------------------
 # Stubs -- 501 until their development tickets land
 # ---------------------------------------------------------------------------
@@ -274,11 +322,6 @@ async def download_document(
 
 @router.get("/stats", response_model=DocumentStats)
 async def document_stats() -> None:
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@router.delete("/{document_id}", response_model=MessageResponse)
-async def delete_document(document_id: uuid.UUID) -> None:
     raise HTTPException(status_code=501, detail="Not implemented")
 
 

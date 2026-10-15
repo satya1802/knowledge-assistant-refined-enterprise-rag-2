@@ -43,7 +43,10 @@ function extractApiMessage(err, fallback) {
     if (typeof err.body.message === "string") return err.body.message;
   }
   if (err && err.status === 403) {
-    return "You do not have permission to upload documents. Administrator access is required.";
+    return "You do not have permission to delete documents. Administrator access is required.";
+  }
+  if (err && err.status === 404) {
+    return "The document could not be found. It may have already been deleted.";
   }
   return fallback;
 }
@@ -109,6 +112,8 @@ export default function Screen() {
   const [retryCount, setRetryCount] = React.useState(0);
   const [downloadError, setDownloadError] = React.useState(null);
   const [downloadingId, setDownloadingId] = React.useState(null);
+  const [deletingId, setDeletingId] = React.useState(null);
+  const [deleteError, setDeleteError] = React.useState(null);
 
   // ── Fetch documents from GET /documents on mount and on retry ────────────
   React.useEffect(
@@ -256,10 +261,28 @@ export default function Screen() {
     if (file) handleFileUpload(file);
   }
 
-  function handleDelete(docId) {
-    setDocuments((prev) => prev.filter((d) => d.id !== docId));
-    setConfirmDeleteId(null);
-    setRecentlyUploaded((prev) => prev.filter((id) => id !== docId));
+  // Delete a document via DELETE /documents/{id}. The document is removed
+  // from local state ONLY after a successful API response (200/204). On
+  // failure (403, 404, network error) the document remains in the table
+  // and a user-visible error is shown inside the confirmation dialog.
+  async function handleDelete(docId) {
+    setDeletingId(docId);
+    setDeleteError(null);
+    try {
+      await apiFetch("/documents/" + docId, { method: "DELETE" });
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+      setConfirmDeleteId(null);
+      setRecentlyUploaded((prev) => prev.filter((id) => id !== docId));
+    } catch (err) {
+      setDeleteError(
+        extractApiMessage(
+          err,
+          "Could not delete the document. Please check your connection and try again.",
+        ),
+      );
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   // Re-index a failed/ready document via POST /documents/{id}/reindex.
@@ -314,10 +337,9 @@ export default function Screen() {
     setDownloadError(null);
     setDownloadingId(doc.id);
     try {
-      var response = await fetch(
-        API_BASE_URL + "/documents/" + doc.id + "/download",
-        { credentials: "include" },
-      );
+      var response = await fetch(API_BASE_URL + "/documents/" + doc.id + "/download", {
+        credentials: "include",
+      });
       if (!response.ok) {
         var body;
         try {
@@ -336,8 +358,7 @@ export default function Screen() {
       // document record's filename so the downloaded file retains its
       // original name.
       var filename =
-        parseFilenameFromDisposition(response.headers.get("Content-Disposition")) ||
-        doc.filename;
+        parseFilenameFromDisposition(response.headers.get("Content-Disposition")) || doc.filename;
       var url = window.URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
@@ -1096,7 +1117,10 @@ export default function Screen() {
                       "button",
                       {
                         className: "ka-action-btn",
-                        onClick: () => setConfirmDeleteId(doc.id),
+                        onClick: () => {
+                          setConfirmDeleteId(doc.id);
+                          setDeleteError(null);
+                        },
                         "aria-label": "Delete " + doc.filename,
                         title: "Delete",
                         style: {
@@ -1135,6 +1159,7 @@ export default function Screen() {
     ? (function () {
         const doc = documents.find((d) => d.id === confirmDeleteId);
         if (!doc) return null;
+        var isDeleting = deletingId === confirmDeleteId;
         return React.createElement(
           "div",
           {
@@ -1148,9 +1173,11 @@ export default function Screen() {
               zIndex: 50,
               animation: "kaSlideIn 0.15s ease-out",
             },
-            onClick: () => setConfirmDeleteId(null),
+            onClick: () => {
+              if (!isDeleting) setConfirmDeleteId(null);
+            },
             onKeyDown: (e) => {
-              if (e.key === "Escape") setConfirmDeleteId(null);
+              if (e.key === "Escape" && !isDeleting) setConfirmDeleteId(null);
             },
           },
           React.createElement(
@@ -1196,6 +1223,35 @@ export default function Screen() {
               React.createElement("strong", null, doc.filename) +
                 " will be permanently removed along with all extracted chunks, embeddings, and index metadata. This cannot be undone.",
             ),
+            // Delete error — shown inside the dialog when the DELETE
+            // request fails (403, 404, network error). The document is
+            // NOT removed from the table.
+            deleteError
+              ? React.createElement(
+                  "div",
+                  {
+                    style: {
+                      marginBottom: "16px",
+                      padding: "10px 14px",
+                      borderRadius: brand.radius,
+                      backgroundColor: "rgba(220, 38, 38, 0.06)",
+                      border: "1px solid rgba(220, 38, 38, 0.2)",
+                      fontSize: "13px",
+                      color: "#dc2626",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "8px",
+                    },
+                    role: "alert",
+                  },
+                  React.createElement(Icons.AlertCircle, {
+                    size: 16,
+                    "aria-hidden": "true",
+                    style: { flexShrink: 0, marginTop: "1px" },
+                  }),
+                  React.createElement("span", null, deleteError),
+                )
+              : null,
             React.createElement(
               "div",
               {
@@ -1206,14 +1262,20 @@ export default function Screen() {
                 {
                   variant: "outline",
                   onClick: () => setConfirmDeleteId(null),
+                  disabled: isDeleting,
+                  style: {
+                    opacity: isDeleting ? 0.5 : 1,
+                    cursor: isDeleting ? "not-allowed" : "pointer",
+                  },
                 },
                 "Cancel",
               ),
               React.createElement(
-                UI.Button,
+                "button",
                 {
-                  variant: "destructive",
                   onClick: () => handleDelete(confirmDeleteId),
+                  disabled: isDeleting,
+                  "aria-busy": isDeleting,
                   style: {
                     backgroundColor: "#dc2626",
                     color: "#ffffff",
@@ -1222,10 +1284,31 @@ export default function Screen() {
                     padding: "8px 16px",
                     fontSize: "13px",
                     fontWeight: 600,
-                    cursor: "pointer",
+                    cursor: isDeleting ? "not-allowed" : "pointer",
+                    opacity: isDeleting ? 0.7 : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
                   },
                 },
-                "Delete permanently",
+                isDeleting
+                  ? [
+                      React.createElement("span", {
+                        key: "spinner",
+                        style: {
+                          width: "14px",
+                          height: "14px",
+                          border: "2px solid rgba(255,255,255,0.3)",
+                          borderTopColor: "#ffffff",
+                          borderRadius: "50%",
+                          display: "inline-block",
+                          animation: "kaPulse 0.8s linear infinite",
+                        },
+                        "aria-hidden": "true",
+                      }),
+                      React.createElement("span", { key: "label" }, "Deleting…"),
+                    ]
+                  : "Delete permanently",
               ),
             ),
           ),

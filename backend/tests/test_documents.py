@@ -13,6 +13,11 @@ Covers:
   AC-043 — documents persist across simulated restart (data read from DB after
            new SessionLocal).
   AC-044 — startup does not truncate or delete existing document records.
+  AC-052 — admin DELETE /documents/{id} deletes file, document, chunks,
+           embeddings, and citations.
+  AC-053 — after deletion, GET /documents does not include the deleted document.
+  AC-054 — after deletion, no chunks or citations remain for that document_id.
+  AC-055 — regular (non-admin) user DELETE → 403, no data removed.
 
 Follows patterns from test_auth_login.py and test_users.py: TestClient, direct
 DB inserts for fixtures, login to obtain session cookies, try/finally cleanup.
@@ -33,7 +38,14 @@ from sqlalchemy import select
 
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Document, User
+from app.models import (
+    Citation,
+    Chunk,
+    Conversation,
+    Document,
+    Message,
+    User,
+)
 from app.routers.documents import UPLOAD_DIR
 from app.seed import seed_admin
 
@@ -81,6 +93,22 @@ def _logout(session_id: str) -> None:
 def _cleanup_documents() -> None:
     """Delete all Document rows and remove their files from uploads."""
     with SessionLocal() as db:
+        # Delete citations first (FK to documents and chunks)
+        citations = db.execute(select(Citation)).scalars().all()
+        for c in citations:
+            db.delete(c)
+        # Delete messages and conversations to avoid orphaned FK references
+        messages = db.execute(select(Message)).scalars().all()
+        for m in messages:
+            db.delete(m)
+        conversations = db.execute(select(Conversation)).scalars().all()
+        for conv in conversations:
+            db.delete(conv)
+        # Delete chunks
+        chunks = db.execute(select(Chunk)).scalars().all()
+        for ch in chunks:
+            db.delete(ch)
+        # Delete documents
         docs = db.execute(select(Document)).scalars().all()
         for d in docs:
             p = Path(d.file_path)
@@ -108,6 +136,65 @@ def _to_uuid(value: str) -> uuid_mod.UUID:
 def _files_before() -> set[Path]:
     """Snapshot of files currently in the uploads directory."""
     return set(UPLOAD_DIR.glob("*"))
+
+
+def _create_chunks_and_citations(doc_id: uuid_mod.UUID, user_id: int) -> None:
+    """Insert chunks, a conversation, message, and citations for a document.
+
+    This sets up the related records that DELETE must cascade-clean so the
+    tests can verify AC-052 and AC-054.
+    """
+    with SessionLocal() as db:
+        # Two chunks with embeddings for the document
+        chunk1 = Chunk(
+            document_id=doc_id,
+            chunk_text="chunk one text",
+            chunk_index=0,
+            page_section="page 1",
+            embedding=[0.1] * 768,
+        )
+        chunk2 = Chunk(
+            document_id=doc_id,
+            chunk_text="chunk two text",
+            chunk_index=1,
+            page_section="page 2",
+            embedding=[0.2] * 768,
+        )
+        db.add(chunk1)
+        db.add(chunk2)
+        db.flush()
+
+        # A conversation + message so we can attach citations
+        conversation = Conversation(user_id=user_id, title="Test conversation")
+        db.add(conversation)
+        db.flush()
+
+        message = Message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content="Answer based on the document",
+        )
+        db.add(message)
+        db.flush()
+
+        # Citations linking the message to the document's chunks
+        citation1 = Citation(
+            message_id=message.id,
+            document_id=doc_id,
+            chunk_id=chunk1.id,
+            filename="delete-me.txt",
+            page_section="page 1",
+        )
+        citation2 = Citation(
+            message_id=message.id,
+            document_id=doc_id,
+            chunk_id=chunk2.id,
+            filename="delete-me.txt",
+            page_section="page 2",
+        )
+        db.add(citation1)
+        db.add(citation2)
+        db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +815,8 @@ class TestStartupDoesNotDeleteDocuments:
             assert doc.filename == "full-startup.pdf"
             count_after = len(db.execute(select(Document)).scalars().all())
             assert count_after == count_before
+
+
 # ---------------------------------------------------------------------------
 # US-017-1 — GET /documents/{id} and GET /documents/{id}/download
 # ---------------------------------------------------------------------------
@@ -853,7 +942,9 @@ class TestDownloadDocument:
         assert resp.status_code == 200
         doc_id = resp.json()["id"]
 
-        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        resp = client.get(
+            f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session}
+        )
         assert resp.status_code == 200, resp.text
         assert resp.content == content
 
@@ -867,7 +958,9 @@ class TestDownloadDocument:
         )
         doc_id = resp.json()["id"]
 
-        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        resp = client.get(
+            f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session}
+        )
         assert resp.status_code == 200
         cd = resp.headers.get("content-disposition", "")
         assert "attachment" in cd
@@ -910,14 +1003,18 @@ class TestDownloadDocument:
         )
         doc_id = resp.json()["id"]
 
-        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.regular_session})
+        resp = client.get(
+            f"/documents/{doc_id}/download", cookies={"session_id": self.regular_session}
+        )
         assert resp.status_code == 200
         assert resp.content == content
 
     def test_download_nonexistent_id_returns_404(self) -> None:
         """Non-existent document ID returns 404."""
         fake_id = str(uuid_mod.uuid4())
-        resp = client.get(f"/documents/{fake_id}/download", cookies={"session_id": self.admin_session})
+        resp = client.get(
+            f"/documents/{fake_id}/download", cookies={"session_id": self.admin_session}
+        )
         assert resp.status_code == 404
 
     def test_download_file_missing_from_disk_returns_error(self) -> None:
@@ -939,7 +1036,9 @@ class TestDownloadDocument:
         file_path.unlink()
         assert not file_path.exists()
 
-        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        resp = client.get(
+            f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session}
+        )
         assert resp.status_code == 404
         detail = resp.json()["detail"].lower()
         assert "missing" in detail
@@ -958,7 +1057,9 @@ class TestDownloadDocument:
             doc = db.execute(select(Document).where(Document.id == doc_id)).scalar_one()
             Path(doc.file_path).unlink()
 
-        resp = client.get(f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session})
+        resp = client.get(
+            f"/documents/{doc_id}/download", cookies={"session_id": self.admin_session}
+        )
         assert resp.status_code == 404
         assert "missing" in resp.json()["detail"].lower()
 
@@ -985,4 +1086,288 @@ class TestGetDownloadUnauthenticated:
     def test_download_unauthenticated_returns_401(self) -> None:
         fake_id = str(uuid_mod.uuid4())
         resp = client.get(f"/documents/{fake_id}/download")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# US-019-1 — DELETE /documents/{id} with cascading cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteDocumentAdmin:
+    """AC-052 / AC-053 / AC-054 — admin DELETE removes file, document,
+    chunks, embeddings, and citations; subsequent GET excludes it."""
+
+    def setup_method(self) -> None:
+        self.admin_email = "us019_admin_delete@example.com"
+        self.admin_pw = "admin-pw-123"
+        _create_user(self.admin_email, self.admin_pw, role="Administrator")
+        self.session_id = _login(self.admin_email, self.admin_pw)
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _logout(self.session_id)
+        _cleanup_documents()
+        _delete_user(self.admin_email)
+
+    def _upload_doc_with_chunks_and_citations(self) -> tuple[str, Path]:
+        """Upload a document, add chunks + citations, return (doc_id, file_path)."""
+        content = b"document to be deleted"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "delete-me.txt")},
+            cookies={"session_id": self.session_id},
+        )
+        assert resp.status_code == 200
+        doc_id = resp.json()["id"]
+        doc_uuid = _to_uuid(doc_id)
+
+        with SessionLocal() as db:
+            admin = db.execute(
+                select(User).where(User.email == self.admin_email)
+            ).scalar_one()
+            admin_id = admin.id
+
+        _create_chunks_and_citations(doc_uuid, admin_id)
+
+        with SessionLocal() as db:
+            doc = db.execute(
+                select(Document).where(Document.id == doc_uuid)
+            ).scalar_one()
+            file_path = Path(doc.file_path)
+
+        return doc_id, file_path
+
+    def test_delete_returns_message_response(self) -> None:
+        """AC-052: successful deletion returns MessageResponse JSON."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        resp = client.delete(
+            f"/documents/{doc_id}", cookies={"session_id": self.session_id}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["message"] == "Document deleted successfully"
+
+    def test_delete_removes_file_from_filesystem(self) -> None:
+        """AC-052: the stored file is removed from the filesystem."""
+        doc_id, file_path = self._upload_doc_with_chunks_and_citations()
+        assert file_path.exists()
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+        assert not file_path.exists()
+
+    def test_delete_removes_document_record(self) -> None:
+        """AC-052: the Document DB record is removed."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        doc_uuid = _to_uuid(doc_id)
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        with SessionLocal() as db:
+            doc = db.execute(
+                select(Document).where(Document.id == doc_uuid)
+            ).scalar_one_or_none()
+            assert doc is None
+
+    def test_delete_removes_chunks_and_embeddings(self) -> None:
+        """AC-052 / AC-054: all chunks (and their embeddings) are removed."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        doc_uuid = _to_uuid(doc_id)
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        with SessionLocal() as db:
+            chunks = db.execute(
+                select(Chunk).where(Chunk.document_id == doc_uuid)
+            ).scalars().all()
+            assert len(chunks) == 0
+
+    def test_delete_removes_citations(self) -> None:
+        """AC-052: all citations referencing the document are removed."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        doc_uuid = _to_uuid(doc_id)
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        with SessionLocal() as db:
+            citations = db.execute(
+                select(Citation).where(Citation.document_id == doc_uuid)
+            ).scalars().all()
+            assert len(citations) == 0
+
+    def test_delete_excludes_from_get_documents(self) -> None:
+        """AC-053: after deletion, GET /documents does not include the doc."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        resp = client.get("/documents", cookies={"session_id": self.session_id})
+        assert resp.status_code == 200
+        items = resp.json()
+        assert not any(i["id"] == doc_id for i in items)
+        assert len(items) == 0
+
+    def test_delete_then_get_detail_returns_404(self) -> None:
+        """AC-053: after deletion, GET /documents/{id} returns 404."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        resp = client.get(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+        assert resp.status_code == 404
+
+    def test_delete_chunks_empty_for_document_id(self) -> None:
+        """AC-054: chunks table is empty for the deleted document_id."""
+        doc_id, _ = self._upload_doc_with_chunks_and_citations()
+        doc_uuid = _to_uuid(doc_id)
+
+        # Verify chunks exist before deletion
+        with SessionLocal() as db:
+            chunks_before = db.execute(
+                select(Chunk).where(Chunk.document_id == doc_uuid)
+            ).scalars().all()
+            assert len(chunks_before) == 2
+
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+
+        with SessionLocal() as db:
+            chunks_after = db.execute(
+                select(Chunk).where(Chunk.document_id == doc_uuid)
+            ).scalars().all()
+            assert len(chunks_after) == 0
+
+    def test_delete_file_already_removed_from_disk(self) -> None:
+        """Deletion succeeds even when the file is already gone from disk."""
+        doc_id, file_path = self._upload_doc_with_chunks_and_citations()
+        file_path.unlink()  # simulate file already gone
+        assert not file_path.exists()
+
+        resp = client.delete(f"/documents/{doc_id}", cookies={"session_id": self.session_id})
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "Document deleted successfully"
+
+        doc_uuid = _to_uuid(doc_id)
+        with SessionLocal() as db:
+            doc = db.execute(
+                select(Document).where(Document.id == doc_uuid)
+            ).scalar_one_or_none()
+            assert doc is None
+
+
+class TestDeleteDocumentNonAdmin:
+    """AC-055 — regular (non-admin) user DELETE → 403, no data removed."""
+
+    def setup_method(self) -> None:
+        self.admin_email = "us019_admin_for_403@example.com"
+        self.regular_email = "us019_regular_delete@example.com"
+        self.pw = "pw-123"
+        _create_user(self.admin_email, self.pw, role="Administrator")
+        _create_user(self.regular_email, self.pw, role="Regular User")
+        self.admin_session = _login(self.admin_email, self.pw)
+        self.regular_session = _login(self.regular_email, self.pw)
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _logout(self.admin_session)
+        _logout(self.regular_session)
+        _cleanup_documents()
+        _delete_user(self.regular_email)
+        _delete_user(self.admin_email)
+
+    def test_regular_user_delete_returns_403(self) -> None:
+        """AC-055: non-admin DELETE → 403 Forbidden."""
+        content = b"protected document"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "protected.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+
+        resp = client.delete(
+            f"/documents/{doc_id}", cookies={"session_id": self.regular_session}
+        )
+        assert resp.status_code == 403
+
+    def test_regular_user_delete_no_data_removed(self) -> None:
+        """AC-055: after 403, the document and its file are still present."""
+        content = b"protected document 2"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "protected2.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+        doc_uuid = _to_uuid(doc_id)
+
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
+
+        with SessionLocal() as db:
+            doc = db.execute(
+                select(Document).where(Document.id == doc_uuid)
+            ).scalar_one_or_none()
+            assert doc is not None
+            assert doc.filename == "protected2.txt"
+
+        # File still on disk
+        with SessionLocal() as db:
+            doc = db.execute(
+                select(Document).where(Document.id == doc_uuid)
+            ).scalar_one()
+            assert Path(doc.file_path).exists()
+
+    def test_regular_user_delete_no_chunks_removed(self) -> None:
+        """AC-055: after 403, any chunks associated with the document remain."""
+        content = b"protected document 3"
+        resp = client.post(
+            "/documents",
+            files={"file": _make_file(content, "protected3.txt")},
+            cookies={"session_id": self.admin_session},
+        )
+        doc_id = resp.json()["id"]
+        doc_uuid = _to_uuid(doc_id)
+
+        with SessionLocal() as db:
+            admin = db.execute(
+                select(User).where(User.email == self.admin_email)
+            ).scalar_one()
+            admin_id = admin.id
+        _create_chunks_and_citations(doc_uuid, admin_id)
+
+        client.delete(f"/documents/{doc_id}", cookies={"session_id": self.regular_session})
+
+        with SessionLocal() as db:
+            chunks = db.execute(
+                select(Chunk).where(Chunk.document_id == doc_uuid)
+            ).scalars().all()
+            assert len(chunks) == 2
+
+
+class TestDeleteDocumentNotFound:
+    """DELETE on a non-existent document ID returns 404 Not Found."""
+
+    def setup_method(self) -> None:
+        self.admin_email = "us019_admin_404@example.com"
+        self.admin_pw = "admin-pw-123"
+        _create_user(self.admin_email, self.admin_pw, role="Administrator")
+        self.session_id = _login(self.admin_email, self.admin_pw)
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _logout(self.session_id)
+        _cleanup_documents()
+        _delete_user(self.admin_email)
+
+    def test_delete_nonexistent_id_returns_404(self) -> None:
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.delete(f"/documents/{fake_id}", cookies={"session_id": self.session_id})
+        assert resp.status_code == 404
+
+
+class TestDeleteDocumentUnauthenticated:
+    """Unauthenticated DELETE → 401."""
+
+    def setup_method(self) -> None:
+        _cleanup_documents()
+
+    def teardown_method(self) -> None:
+        _cleanup_documents()
+
+    def test_unauthenticated_delete_returns_401(self) -> None:
+        fake_id = str(uuid_mod.uuid4())
+        resp = client.delete(f"/documents/{fake_id}")
         assert resp.status_code == 401

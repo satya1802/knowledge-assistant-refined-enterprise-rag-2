@@ -563,4 +563,238 @@ describe("KnowledgeBase screen — API wiring", () => {
     expect(downloadBtn).toBeInTheDocument();
     expect(downloadBtn.tagName).toBe("BUTTON");
   });
+
+  // ── Delete (DELETE /documents/{id}) — opens confirmation dialog ───────────
+  it("opens the confirmation dialog when the delete button is clicked", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-del", filename: "Remove-Me.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Remove-Me.pdf")).toBeInTheDocument();
+    });
+
+    // Before clicking, the dialog should not be visible.
+    expect(screen.queryByText("Delete document?")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Delete Remove-Me.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete document?")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    expect(screen.getByText("Cancel")).toBeInTheDocument();
+  });
+
+  // ── Delete — success (200 with MessageResponse) ───────────────────────────
+  it("calls DELETE /documents/{id} via apiFetch and removes the document on success", async () => {
+    mockedApiFetch.mockResolvedValueOnce([
+      makeDoc({ id: "doc-del", filename: "Remove-Me.pdf" }),
+      makeDoc({ id: "doc-keep", filename: "Keep-Me.pdf" }),
+    ]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Remove-Me.pdf")).toBeInTheDocument();
+    });
+
+    // Open the confirmation dialog.
+    fireEvent.click(screen.getByLabelText("Delete Remove-Me.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    // Mock the DELETE call to return a MessageResponse.
+    mockedApiFetch.mockResolvedValueOnce({ message: "Document deleted successfully" });
+
+    // Confirm deletion.
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith("/documents/doc-del", { method: "DELETE" });
+    });
+
+    // The document should be removed from the table.
+    await waitFor(() => {
+      expect(screen.queryByText("Remove-Me.pdf")).not.toBeInTheDocument();
+    });
+    // The other document should still be present.
+    expect(screen.getByText("Keep-Me.pdf")).toBeInTheDocument();
+    // The dialog should be closed.
+    expect(screen.queryByText("Delete document?")).not.toBeInTheDocument();
+  });
+
+  // ── Delete — success (204 No Content) ─────────────────────────────────────
+  it("removes the document on a 204 No Content response", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-204", filename: "Gone.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Gone.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete Gone.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    // 204 returns undefined from apiFetch.
+    mockedApiFetch.mockResolvedValueOnce(undefined);
+
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith("/documents/doc-204", { method: "DELETE" });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Gone.pdf")).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Delete — 403 forbidden ────────────────────────────────────────────────
+  it("displays a user-visible error and keeps the document on 403 forbidden", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-403", filename: "Forbidden.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Forbidden.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete Forbidden.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    mockedApiFetch.mockRejectedValueOnce(
+      new ApiError("DELETE /documents/doc-403 failed: 403", 403, {
+        detail: "Not enough permissions",
+      }),
+    );
+
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith("/documents/doc-403", { method: "DELETE" });
+    });
+
+    // The document should still be in the table.
+    await waitFor(() => {
+      expect(screen.getByText("Forbidden.pdf")).toBeInTheDocument();
+    });
+    // A user-visible error message should be displayed inside the dialog.
+    await waitFor(() => {
+      expect(screen.getByText(/Not enough permissions/)).toBeInTheDocument();
+    });
+    // The dialog should still be open (not closed on error).
+    expect(screen.getByText("Delete document?")).toBeInTheDocument();
+  });
+
+  // ── Delete — 404 not found ────────────────────────────────────────────────
+  it("displays a user-visible error and keeps the document on 404 not found", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-404", filename: "NotFound.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("NotFound.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete NotFound.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    mockedApiFetch.mockRejectedValueOnce(
+      new ApiError("DELETE /documents/doc-404 failed: 404", 404, {
+        detail: "Document not found",
+      }),
+    );
+
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith("/documents/doc-404", { method: "DELETE" });
+    });
+
+    // The document should still be in the table.
+    await waitFor(() => {
+      expect(screen.getByText("NotFound.pdf")).toBeInTheDocument();
+    });
+    // A user-visible error message should be displayed.
+    await waitFor(() => {
+      expect(screen.getByText("Document not found")).toBeInTheDocument();
+    });
+  });
+
+  // ── Delete — network error ────────────────────────────────────────────────
+  it("displays a network error message and keeps the document when the DELETE fails to reach the server", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-net", filename: "NetErr.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("NetErr.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete NetErr.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    // A plain Error (not ApiError) simulates a network failure.
+    mockedApiFetch.mockRejectedValueOnce(new Error("fetch failed"));
+
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    await waitFor(() => {
+      expect(mockedApiFetch).toHaveBeenCalledWith("/documents/doc-net", { method: "DELETE" });
+    });
+
+    // The document should still be in the table.
+    await waitFor(() => {
+      expect(screen.getByText("NetErr.pdf")).toBeInTheDocument();
+    });
+    // A user-visible network error should be displayed.
+    await waitFor(() => {
+      expect(screen.getByText(/Could not delete the document/)).toBeInTheDocument();
+    });
+  });
+
+  // ── Delete — loading state prevents double-submission ─────────────────────
+  it("shows a loading state and disables the delete button during the API call", async () => {
+    mockedApiFetch.mockResolvedValueOnce([makeDoc({ id: "doc-loading", filename: "Loading.pdf" })]);
+    renderScreen();
+
+    await waitFor(() => {
+      expect(screen.getByText("Loading.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete Loading.pdf"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete permanently")).toBeInTheDocument();
+    });
+
+    // Never-resolving promise keeps the component in the loading state.
+    mockedApiFetch.mockReturnValue(new Promise(() => {}));
+
+    fireEvent.click(screen.getByText("Delete permanently"));
+
+    // The "Deleting…" label should appear while the request is in flight.
+    await waitFor(() => {
+      expect(screen.getByText("Deleting…")).toBeInTheDocument();
+    });
+    // The original "Delete permanently" label should be gone.
+    expect(screen.queryByText("Delete permanently")).not.toBeInTheDocument();
+    // The Cancel button should be disabled.
+    expect(screen.getByText("Cancel").closest("button")).toBeDisabled();
+    // The delete button should also be disabled (aria-busy).
+    const deleteBtn = screen.getByText("Deleting…").closest("button");
+    expect(deleteBtn).toBeDisabled();
+    // The document should still be in the table (not optimistically removed).
+    expect(screen.getByText("Loading.pdf")).toBeInTheDocument();
+  });
 });
