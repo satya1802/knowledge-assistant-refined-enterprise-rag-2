@@ -34,7 +34,7 @@ class LoginRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: UUID
+    id: int
     email: str
     role: str
 
