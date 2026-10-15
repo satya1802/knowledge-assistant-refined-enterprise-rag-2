@@ -6,9 +6,47 @@ import * as UI from "@/lib/ui";
 import { Icons } from "@/lib/icons";
 import { brand } from "@/lib/brand";
 import { useNavigate } from "@/lib/navigate";
+import { apiFetch, apiUpload, ApiError } from "@/lib/api";
 
 const { Button, Input, Select, Table, THead, TBody, TR, TH, TD, Stat } = UI;
 const { Search, Check, User, FileText, Trash, Edit, Filter, Download, Upload, AlertCircle } = Icons;
+
+// DocumentListItem from GET /documents:
+//   {id, filename, file_type, file_size, status, created_at, failure_reason|null}
+// DocumentResponse from POST /documents:
+//   {id, filename, file_type, file_size, status, created_at}  (no failure_reason)
+//
+// Normalize either shape into the row model the table renders against.
+// `failure_reason` defaults to null for freshly-uploaded documents.
+function normalizeDocument(d) {
+  return {
+    id: d.id,
+    filename: d.filename,
+    file_type: d.file_type,
+    file_size: d.file_size,
+    status: d.status,
+    failure_reason: d.failure_reason || null,
+    created_at: d.created_at,
+  };
+}
+
+// Extract a human-readable message from an ApiError body. FastAPI returns
+// {"detail": "string"} or {"detail": [{msg: "..."}]} on 422/403/etc.
+function extractApiMessage(err, fallback) {
+  if (err && err.body && typeof err.body === "object") {
+    var detail = err.body.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      if (typeof detail[0] === "string") return detail[0];
+      if (detail[0] && detail[0].msg) return detail[0].msg;
+    }
+    if (typeof err.body.message === "string") return err.body.message;
+  }
+  if (err && err.status === 403) {
+    return "You do not have permission to upload documents. Administrator access is required.";
+  }
+  return fallback;
+}
 
 export default function Screen() {
   const navigate = useNavigate();
@@ -30,142 +68,9 @@ export default function Screen() {
   };
   const isAdmin = currentUser.role === "Administrator";
 
-  // Initial document data — realistic week's worth
-  const initialDocuments = [
-    {
-      id: "doc-001",
-      filename: "Q4-2025-Financial-Report.pdf",
-      file_type: "PDF",
-      file_size: 4823567,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-08T09:14:00Z",
-    },
-    {
-      id: "doc-002",
-      filename: "Employee-Handbook-2026.docx",
-      file_type: "DOCX",
-      file_size: 1248000,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-08T10:02:00Z",
-    },
-    {
-      id: "doc-003",
-      filename: "Security-Policy-v4.md",
-      file_type: "MD",
-      file_size: 28450,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-09T14:30:00Z",
-    },
-    {
-      id: "doc-004",
-      filename: "API-Gateway-Architecture.pdf",
-      file_type: "PDF",
-      file_size: 8901234,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-09T15:45:00Z",
-    },
-    {
-      id: "doc-005",
-      filename: "Vendor-Onboarding-Guide.docx",
-      file_type: "DOCX",
-      file_size: 567000,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-10T08:20:00Z",
-    },
-    {
-      id: "doc-006",
-      filename: "Incident-Response-Runbook.txt",
-      file_type: "TXT",
-      file_size: 18900,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-10T11:15:00Z",
-    },
-    {
-      id: "doc-007",
-      filename: "Scanned-Legacy-Contracts.pdf",
-      file_type: "PDF",
-      file_size: 15240000,
-      status: "Failed",
-      failure_reason:
-        "Gemini embedding API quota exceeded during chunk embedding generation (chunk 34 of 142). Re-index to retry.",
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-11T13:00:00Z",
-    },
-    {
-      id: "doc-008",
-      filename: "Data-Retention-Policy.md",
-      file_type: "MD",
-      file_size: 15600,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-12T09:30:00Z",
-    },
-    {
-      id: "doc-009",
-      filename: "Quarterly-Board-Minutes.pdf",
-      file_type: "PDF",
-      file_size: 3456000,
-      status: "Processing",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-15T07:45:00Z",
-    },
-    {
-      id: "doc-010",
-      filename: "Cloud-Migration-Plan.docx",
-      file_type: "DOCX",
-      file_size: 2340000,
-      status: "Processing",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-15T08:10:00Z",
-    },
-    {
-      id: "doc-011",
-      filename: "Onsite-Network-Diagram.pdf",
-      file_type: "PDF",
-      file_size: 6780000,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-11T16:20:00Z",
-    },
-    {
-      id: "doc-012",
-      filename: "Compliance-Audit-Checklist.txt",
-      file_type: "TXT",
-      file_size: 9800,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-12T14:00:00Z",
-    },
-    {
-      id: "doc-013",
-      filename: "HR-Benefits-Summary-2026.docx",
-      file_type: "DOCX",
-      file_size: 890000,
-      status: "Ready",
-      failure_reason: null,
-      uploaded_by: "satya.ganaraju@quorq.ai",
-      created_at: "2026-10-13T10:30:00Z",
-    },
-  ];
-
-  const [documents, setDocuments] = React.useState(initialDocuments);
+  // Documents are loaded from GET /documents — never initialized from a
+  // hardcoded array (AC-047).
+  const [documents, setDocuments] = React.useState([]);
   const [searchTerm, setSearchTerm] = React.useState("");
   const [typeFilter, setTypeFilter] = React.useState("all");
   const [statusFilter, setStatusFilter] = React.useState("all");
@@ -173,47 +78,39 @@ export default function Screen() {
   const [uploading, setUploading] = React.useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState(null);
   const [recentlyUploaded, setRecentlyUploaded] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [retryingId, setRetryingId] = React.useState(null);
+  const [retryCount, setRetryCount] = React.useState(0);
 
-  // Simulate polling: processing documents transition to Ready after a delay
-  const processingTimers = React.useRef([]);
-
-  React.useEffect(() => {
-    return () => {
-      processingTimers.current.forEach((t) => clearTimeout(t));
-    };
-  }, []);
-
-  // Simulate processing completion for initial processing docs
-  React.useEffect(() => {
-    documents.forEach((doc) => {
-      if (doc.status === "Processing") {
-        const timer = setTimeout(() => {
-          setDocuments((prev) =>
-            prev.map((d) => {
-              if (d.id === doc.id) {
-                // doc-010 fails for variety, doc-009 succeeds
-                if (d.id === "doc-010") {
-                  return {
-                    ...d,
-                    status: "Failed",
-                    failure_reason:
-                      "Gemini embedding API returned 429 Too Many Requests during batch embedding. Re-index to retry.",
-                  };
-                }
-                return { ...d, status: "Ready", failure_reason: null };
-              }
-              return d;
-            }),
-          );
-        }, 6000);
-        processingTimers.current.push(timer);
+  // ── Fetch documents from GET /documents on mount and on retry ────────────
+  React.useEffect(
+    function () {
+      var cancelled = false;
+      async function load() {
+        setLoading(true);
+        setLoadError(null);
+        try {
+          var data = await apiFetch("/documents");
+          if (!cancelled) setDocuments((data || []).map(normalizeDocument));
+        } catch (err) {
+          if (!cancelled) {
+            setLoadError(
+              "Could not load the Knowledge Base. Please check your connection and try again.",
+            );
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
       }
-    });
-  }, []); // run once on mount
+      load();
+      return function () {
+        cancelled = true;
+      };
+    },
+    [retryCount],
+  );
 
   // Counts for statistics
   const stats = {
@@ -252,23 +149,24 @@ export default function Screen() {
     return d.toLocaleDateString("en-US", opts);
   }
 
-  // Handle file upload (simulated)
-  function handleFileUpload(file) {
+  // Handle file upload — POST /documents as multipart/form-data (AC: upload)
+  async function handleFileUpload(file) {
     setUploadError(null);
 
     if (!file) return;
 
-    // Validate file type
+    // Client-side pre-validation for instant feedback; the server also
+    // enforces these and its 422 message is surfaced on rejection.
     const ext = file.name.split(".").pop().toUpperCase();
     const allowedTypes = ["PDF", "DOCX", "TXT", "MD"];
     if (!allowedTypes.includes(ext)) {
       setUploadError(
-        file.name + " is not a supported format. Only PDF, DOCX, TXT, and MD files are accepted.",
+        file.name +
+          " is not a supported format. Only PDF, DOCX, TXT, and MD files are accepted.",
       );
       return;
     }
 
-    // Validate file size (25 MB)
     if (file.size > 25 * 1024 * 1024) {
       setUploadError(
         file.name + " is " + formatSize(file.size) + " — exceeds the 25 MB upload limit.",
@@ -278,40 +176,32 @@ export default function Screen() {
 
     setUploading(true);
 
-    // Simulate upload + processing start
-    setTimeout(() => {
-      const newDoc = {
-        id:
-          "doc-" +
-          String(documents.length + 1).padStart(3, "0") +
-          "-" +
-          Date.now().toString().slice(-4),
-        filename: file.name,
-        file_type: ext,
-        file_size: file.size,
-        status: "Processing",
-        failure_reason: null,
-        uploaded_by: currentUser.email,
-        created_at: new Date().toISOString(),
-      };
-      setDocuments((prev) => [newDoc, ...prev]);
-      setRecentlyUploaded((prev) => [...prev, newDoc.id]);
-      setUploading(false);
-
-      // Simulate processing completion
-      const timer = setTimeout(() => {
-        setDocuments((prev) =>
-          prev.map((d) => {
-            if (d.id === newDoc.id) {
-              return { ...d, status: "Ready", failure_reason: null };
-            }
-            return d;
-          }),
+    try {
+      var newDoc = await apiUpload("/documents", file);
+      var normalized = normalizeDocument(newDoc);
+      setDocuments((prev) => [normalized, ...prev]);
+      setRecentlyUploaded((prev) => [...prev, normalized.id]);
+    } catch (err) {
+      // Surface the server-provided message for 422 (size/type), 403
+      // (forbidden), and other errors.
+      if (err instanceof ApiError || (err && err.status)) {
+        setUploadError(
+          extractApiMessage(
+            err,
+            "Upload failed. The file could not be processed. Please try again.",
+          ),
         );
-        processingTimers.current.push(timer);
-      }, 5000);
-      processingTimers.current.push(timer);
-    }, 800);
+      } else {
+        // Network error — fetch never reached the server.
+        setUploadError(
+          "Could not reach the server to upload " +
+            file.name +
+            ". Please check your connection and try again.",
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
   }
 
   function handleFileInputChange(e) {
@@ -347,26 +237,43 @@ export default function Screen() {
     setRecentlyUploaded((prev) => prev.filter((id) => id !== docId));
   }
 
-  function handleReindex(docId) {
+  // Re-index a failed/ready document via POST /documents/{id}/reindex.
+  // No setTimeout simulation — the API response drives the status update.
+  async function handleReindex(docId) {
     setRetryingId(docId);
+    var prevDoc = documents.find((d) => d.id === docId);
+    // Optimistically set to Processing.
     setDocuments((prev) =>
       prev.map((d) => (d.id === docId ? { ...d, status: "Processing", failure_reason: null } : d)),
     );
 
-    // Simulate reindex processing
-    const timer = setTimeout(() => {
+    try {
+      var result = await apiFetch("/documents/" + docId + "/reindex", { method: "POST" });
       setDocuments((prev) =>
-        prev.map((d) => {
-          if (d.id === docId) {
-            return { ...d, status: "Ready", failure_reason: null };
-          }
-          return d;
-        }),
+        prev.map((d) =>
+          d.id === docId
+            ? { ...d, status: (result && result.status) || d.status, failure_reason: null }
+            : d,
+        ),
       );
+    } catch (err) {
+      // Revert to the previous status on failure.
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === docId
+            ? { ...d, status: prevDoc ? prevDoc.status : d.status, failure_reason: prevDoc ? prevDoc.failure_reason : null }
+            : d,
+        ),
+      );
+      setUploadError(
+        extractApiMessage(
+          err,
+          "Re-index failed. The document could not be reprocessed. Please try again.",
+        ),
+      );
+    } finally {
       setRetryingId(null);
-      processingTimers.current.push(timer);
-    }, 4000);
-    processingTimers.current.push(timer);
+    }
   }
 
   // Status badge component
@@ -649,8 +556,41 @@ export default function Screen() {
       )
     : null;
 
+  // ── Loading state ────────────────────────────────────────────────────────
+  const loadingView = React.createElement(
+    "div",
+    {
+      style: { padding: "64px 24px", textAlign: "center" },
+    },
+    React.createElement("span", {
+      style: {
+        display: "inline-block",
+        width: "24px",
+        height: "24px",
+        border: "2px solid rgba(100,116,139,0.2)",
+        borderTopColor: brand.primaryColor,
+        borderRadius: "50%",
+        animation: "kaPulse 0.8s linear infinite",
+        verticalAlign: "middle",
+        marginRight: "12px",
+      },
+      "aria-hidden": "true",
+    }),
+    React.createElement(
+      "span",
+      {
+        style: { fontSize: "14px", color: brand.neutralColor },
+      },
+      "Loading documents…",
+    ),
+  );
+
   // Document table
   const tableContent = (function () {
+    if (loading) {
+      return loadingView;
+    }
+
     if (loadError) {
       return React.createElement(
         "div",
@@ -674,17 +614,17 @@ export default function Screen() {
           {
             style: { fontSize: "13px", color: brand.neutralColor, margin: "0 0 16px 0" },
           },
-          loadError + " The last known document list is shown below if available.",
+          loadError,
         ),
         React.createElement(
           UI.Button,
           {
             variant: "outline",
             onClick: () => {
-              setLoadError(null);
+              setRetryCount((c) => c + 1);
             },
           },
-          "Retry loading",
+          "Try again",
         ),
       );
     }
@@ -1449,6 +1389,7 @@ export default function Screen() {
 
     // Processing note
     stats.processing > 0 &&
+      !loading &&
       React.createElement(
         "div",
         {
@@ -1474,7 +1415,7 @@ export default function Screen() {
         stats.processing +
           " document" +
           (stats.processing > 1 ? "s are" : " is") +
-          " being indexed — status updates automatically every few seconds.",
+          " being indexed — status will update on the next refresh.",
       ),
 
     // Delete confirmation dialog
