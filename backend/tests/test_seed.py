@@ -151,9 +151,7 @@ def test_plaintext_password_not_in_any_database_column(db_session: Session) -> N
         for row in cursor.fetchall():
             for col_name, value in zip(col_names, row, strict=False):
                 if isinstance(value, str) and ADMIN_PASSWORD in value:
-                    pytest.fail(
-                        f"Plaintext password found in {table_name}.{col_name}: {value!r}"
-                    )
+                    pytest.fail(f"Plaintext password found in {table_name}.{col_name}: {value!r}")
     cursor.close()
 
 
@@ -299,9 +297,7 @@ def test_raw_string_session_lookup_raises_type_error(db_session: Session) -> Non
 
     cookie_value = str(session.id)
     with pytest.raises(Exception):  # noqa: B017 -- broad on purpose
-        db_session.execute(
-            select(SessionModel).where(SessionModel.id == cookie_value)
-        ).scalar_one()
+        db_session.execute(select(SessionModel).where(SessionModel.id == cookie_value)).scalar_one()
 
 
 def test_session_lookup_id_static_method() -> None:
