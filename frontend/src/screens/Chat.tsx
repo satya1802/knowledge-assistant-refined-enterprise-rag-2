@@ -742,6 +742,7 @@ export default function Screen() {
       "div",
       {
         key: msg.id,
+        "data-testid": "chat-message-" + msg.id,
         style: {
           display: "flex",
           gap: "10px",
@@ -887,10 +888,18 @@ export default function Screen() {
                   (msg.citations.length > 1 ? "s" : ""),
               ),
               msg.citations.map(function (cit, i) {
+                // Each citation must clearly reference the source document,
+                // the page/section, and the chunk it came from (AC-066).
+                // `page_section` may be absent (schema: str | None), so it
+                // is only included when present.
+                var parts = [cit.filename];
+                if (cit.page_section) parts.push(cit.page_section);
+                parts.push("Chunk " + cit.chunk_id);
                 return React.createElement(
                   "div",
                   {
                     key: cit.id || i,
+                    "data-testid": "citation",
                     style: {
                       display: "inline-flex",
                       alignItems: "center",
@@ -908,7 +917,7 @@ export default function Screen() {
                   React.createElement(
                     "span",
                     { style: { fontVariantNumeric: "tabular-nums" } },
-                    cit.filename + " — " + cit.page_section,
+                    parts.join(" — "),
                   ),
                 );
               }),
