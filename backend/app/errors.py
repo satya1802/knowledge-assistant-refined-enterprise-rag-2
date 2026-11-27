@@ -22,3 +22,8 @@ class ErrorCode:
 
 CHAT_EMPTY_QUESTION = ErrorCode(422, "Question must not be empty")
 CHAT_CONVERSATION_NOT_FOUND = ErrorCode(404, "Conversation not found")
+CHAT_GEMINI_UNAVAILABLE = ErrorCode(
+    503,
+    "The AI service is temporarily unavailable or has reached its quota. "
+    "Your question and chat history have been saved -- please try again shortly.",
+)

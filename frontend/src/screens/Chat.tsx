@@ -5,6 +5,7 @@ import React from "react";
 import * as UI from "@/lib/ui";
 import { Icons } from "@/lib/icons";
 import { brand } from "@/lib/brand";
+import { apiFetch } from "@/lib/api";
 
 const { Button, Input, Textarea, Select } = UI;
 const {
@@ -369,151 +370,43 @@ function getLastMessagePreview(conv) {
   return last.content;
 }
 
-function generateResponse(question) {
-  var q = question.toLowerCase();
-  var id = "cit-" + Date.now() + "-" + Math.random().toString(36).substr(2, 4);
+// Shown when POST /chat fails and the response carries no server-provided
+// detail to surface instead (e.g. a network failure rather than a Gemini
+// error response). Mirrors the backend's CHAT_GEMINI_UNAVAILABLE detail
+// (app/errors.py) word for word, so the same wording is used whether the
+// text comes from the server or from this fallback (AC-072).
+var CHAT_ERROR_FALLBACK_MESSAGE =
+  "The AI service is temporarily unavailable or has reached its quota. " +
+  "Your question and chat history have been saved -- please try again shortly.";
 
-  if (
-    q.indexOf("password") >= 0 ||
-    q.indexOf("security") >= 0 ||
-    q.indexOf("credential") >= 0 ||
-    q.indexOf("encryption") >= 0 ||
-    q.indexOf("mfa") >= 0 ||
-    q.indexOf("authentication") >= 0
-  ) {
-    return {
-      content:
-        "Based on the Information Security Policy in your Knowledge Base, all accounts accessing production systems require multi-factor authentication. Service account passwords must be at least 20 characters with 90-day rotation, and privileged credentials must be vault-managed with automatic rotation. Standard user passwords require a minimum of 12 characters.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "InfoSec_Policy_v3.2.pdf",
-          page_section: "Page 14, §4.3",
-          chunk_id: "chunk-047",
-        },
-      ],
-    };
+// Extract a human-readable message from a failed POST /chat call. FastAPI
+// error responses carry {"detail": "..."} on the thrown ApiError's `body`;
+// any other failure (a network error, a timeout, an unexpected shape) falls
+// back to CHAT_ERROR_FALLBACK_MESSAGE so a clear message is always shown
+// and the screen never hangs or blanks waiting on something that will not
+// resolve into readable text (AC-072).
+function extractChatErrorMessage(err) {
+  if (err && err.body && typeof err.body === "object") {
+    var detail = err.body.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
   }
+  return CHAT_ERROR_FALLBACK_MESSAGE;
+}
 
-  if (
-    q.indexOf("onboard") >= 0 ||
-    q.indexOf("hire") >= 0 ||
-    q.indexOf("new employee") >= 0 ||
-    q.indexOf("hr") >= 0 ||
-    q.indexOf("probation") >= 0
-  ) {
+// Map the citations POST /chat returns (CitationItem: document_id, filename,
+// page_section, chunk_id) onto the local citation shape the message renderer
+// expects.
+function mapCitations(citations) {
+  if (!citations || !citations.length) return [];
+  return citations.map(function (cit) {
     return {
-      content:
-        "Your Knowledge Base documents indicate that new employees must complete the onboarding checklist within their first week, including the I-9 form, NDA, direct deposit setup, and security awareness training. The probationary period is 90 days with performance reviews at 30, 60, and 90 days. The hiring manager submits a review form to HR at least 5 business days before the 90-day mark.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "Onboarding_Checklist_2026.docx",
-          page_section: "§2.1, Para 3",
-          chunk_id: "chunk-012",
-        },
-        {
-          id: id + "-2",
-          filename: "HR_Handbook_Rev4.pdf",
-          page_section: "Page 22, §3.7",
-          chunk_id: "chunk-034",
-        },
-      ],
+      id: cit.chunk_id,
+      document_id: cit.document_id,
+      filename: cit.filename,
+      page_section: cit.page_section,
+      chunk_id: cit.chunk_id,
     };
-  }
-
-  if (
-    q.indexOf("api") >= 0 ||
-    q.indexOf("rate limit") >= 0 ||
-    q.indexOf("gateway") >= 0 ||
-    q.indexOf("throttle") >= 0 ||
-    q.indexOf("endpoint") >= 0
-  ) {
-    return {
-      content:
-        "The API Gateway Configuration document specifies a default rate limit of 1,000 requests per minute per API key, with a burst allowance of 200 requests in any 5-second window. Enterprise tier keys are capped at 10,000 requests per minute. Rate limit headers are included on all responses for client-side throttling. Custom limits can be configured per client through the gateway admin panel.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "API_Gateway_Config.pdf",
-          page_section: "Page 7, §3.2",
-          chunk_id: "chunk-019",
-        },
-      ],
-    };
-  }
-
-  if (
-    q.indexOf("expense") >= 0 ||
-    q.indexOf("per diem") >= 0 ||
-    q.indexOf("reimburse") >= 0 ||
-    q.indexOf("travel") >= 0
-  ) {
-    return {
-      content:
-        "According to the Travel and Expense Policy in your Knowledge Base, the standard domestic per diem is $89 per day for meals and incidentals, with tier-1 cities at $134 per day. Receipts are required for all non-per-diem expenses over $25. Expense reports must be submitted within 30 days of trip completion through the expense management portal.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "Travel_Expense_Policy.pdf",
-          page_section: "Page 5, §2.3",
-          chunk_id: "chunk-008",
-        },
-      ],
-    };
-  }
-
-  if (
-    q.indexOf("vpn") >= 0 ||
-    q.indexOf("remote") >= 0 ||
-    q.indexOf("network") >= 0 ||
-    q.indexOf("firewall") >= 0 ||
-    q.indexOf("port") >= 0
-  ) {
-    return {
-      content:
-        "The VPN Setup Guide in your Knowledge Base specifies IKEv2 with server address vpn.quorq.ai. Required ports are UDP 500, UDP 4500, and ESP protocol 50, with automatic TCP 443 fallback for restrictive firewalls. Multi-factor authentication is enforced for all VPN connections. The gateway IP is 203.0.113.42.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "VPN_Setup_Guide.md",
-          page_section: "§1.3, Lines 24–38",
-          chunk_id: "chunk-005",
-        },
-      ],
-    };
-  }
-
-  if (q.indexOf("document") >= 0 || q.indexOf("upload") >= 0 || q.indexOf("knowledge base") >= 0) {
-    return {
-      content:
-        "Your Knowledge Base currently contains indexed documents in PDF, DOCX, TXT, and MD formats. Administrators can upload new documents through the Knowledge Base tab. Each document goes through text extraction, chunking at approximately 1,000 characters with 150-character overlap, and Gemini 768-dimensional embedding generation before becoming searchable.",
-      is_fallback: false,
-      citations: [
-        {
-          id: id,
-          filename: "System_Overview.md",
-          page_section: "§1, Lines 1–12",
-          chunk_id: "chunk-001",
-        },
-      ],
-    };
-  }
-
-  return {
-    content:
-      "I could not find information about this topic in your uploaded Knowledge Base documents. Based on Gemini's general knowledge: " +
-      question.charAt(0).toUpperCase() +
-      question.slice(1) +
-      " — this answer has not been verified against your company documents. If this topic is important to your work, consider uploading relevant documents to the Knowledge Base so future questions can be answered with citations.",
-    is_fallback: true,
-    citations: [],
-  };
+  });
 }
 
 export default function Screen() {
@@ -630,6 +523,8 @@ export default function Screen() {
       ? question.substring(0, 50) + (question.length > 50 ? "…" : "")
       : selectedConversation.title;
 
+    var conversationId = selectedId;
+
     setConversations(
       conversations.map(function (c) {
         if (c.id !== selectedId) return c;
@@ -645,31 +540,61 @@ export default function Screen() {
     setInput("");
     setIsSending(true);
 
-    setTimeout(function () {
-      var response = generateResponse(question);
-      var respMsg = {
-        id: "msg-" + Date.now() + "-resp",
-        role: "assistant",
-        content: response.content,
-        is_fallback: response.is_fallback,
-        is_error: false,
-        created_at: new Date().toISOString(),
-        citations: response.citations,
-      };
-
-      setConversations(function (prev) {
-        return prev.map(function (c) {
-          if (c.id !== selectedId) return c;
-          return {
-            ...c,
-            messages: c.messages.concat([respMsg]),
-            updated_at: new Date().toISOString(),
-          };
+    // Submit the question to the real RAG flow (POST /chat). A Gemini API
+    // error or quota failure surfaces here as a rejected apiFetch call; it is
+    // shown as a plain assistant message (is_error: true) appended to the
+    // existing history, never by clearing it or leaving the screen hanging
+    // on "Sending…" (AC-072).
+    apiFetch("/chat", {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: conversationId, question: question }),
+    })
+      .then(function (data) {
+        var respMsg = {
+          id: "msg-" + Date.now() + "-resp",
+          role: "assistant",
+          content: data.answer,
+          is_fallback: !!data.is_fallback,
+          is_error: false,
+          created_at: new Date().toISOString(),
+          citations: mapCitations(data.citations),
+        };
+        setConversations(function (prev) {
+          return prev.map(function (c) {
+            if (c.id !== conversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.concat([respMsg]),
+              updated_at: new Date().toISOString(),
+            };
+          });
         });
+      })
+      .catch(function (err) {
+        var errMsg = {
+          id: "msg-" + Date.now() + "-error",
+          role: "assistant",
+          content: extractChatErrorMessage(err),
+          is_fallback: false,
+          is_error: true,
+          created_at: new Date().toISOString(),
+          citations: [],
+        };
+        setConversations(function (prev) {
+          return prev.map(function (c) {
+            if (c.id !== conversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.concat([errMsg]),
+              updated_at: new Date().toISOString(),
+            };
+          });
+        });
+      })
+      .finally(function () {
+        setIsSending(false);
+        setRetrying(false);
       });
-      setIsSending(false);
-      setRetrying(false);
-    }, 1400);
   }
 
   function handleRetryLastQuestion() {
@@ -691,40 +616,73 @@ export default function Screen() {
       }
     }
 
+    var conversationId = selectedId;
+
     setRetrying(true);
     setIsSending(true);
 
-    setTimeout(function () {
-      var response = generateResponse(lastUserMsg.content);
-      var respMsg = {
-        id: "msg-" + Date.now() + "-retry",
-        role: "assistant",
-        content: response.content,
-        is_fallback: response.is_fallback,
-        is_error: false,
-        created_at: new Date().toISOString(),
-        citations: response.citations,
-      };
-
-      setConversations(function (prev) {
-        return prev.map(function (c) {
-          if (c.id !== selectedId) return c;
-          var newMsgs = c.messages.slice();
-          if (errorIdx >= 0) {
-            newMsgs[errorIdx] = respMsg;
-          } else {
-            newMsgs.push(respMsg);
-          }
-          return {
-            ...c,
-            messages: newMsgs,
-            updated_at: new Date().toISOString(),
-          };
+    apiFetch("/chat", {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: conversationId, question: lastUserMsg.content }),
+    })
+      .then(function (data) {
+        var respMsg = {
+          id: "msg-" + Date.now() + "-retry",
+          role: "assistant",
+          content: data.answer,
+          is_fallback: !!data.is_fallback,
+          is_error: false,
+          created_at: new Date().toISOString(),
+          citations: mapCitations(data.citations),
+        };
+        setConversations(function (prev) {
+          return prev.map(function (c) {
+            if (c.id !== conversationId) return c;
+            var newMsgs = c.messages.slice();
+            if (errorIdx >= 0) {
+              newMsgs[errorIdx] = respMsg;
+            } else {
+              newMsgs.push(respMsg);
+            }
+            return {
+              ...c,
+              messages: newMsgs,
+              updated_at: new Date().toISOString(),
+            };
+          });
         });
+      })
+      .catch(function (err) {
+        var errMsg = {
+          id: "msg-" + Date.now() + "-retry-error",
+          role: "assistant",
+          content: extractChatErrorMessage(err),
+          is_fallback: false,
+          is_error: true,
+          created_at: new Date().toISOString(),
+          citations: [],
+        };
+        setConversations(function (prev) {
+          return prev.map(function (c) {
+            if (c.id !== conversationId) return c;
+            var newMsgs = c.messages.slice();
+            if (errorIdx >= 0) {
+              newMsgs[errorIdx] = errMsg;
+            } else {
+              newMsgs.push(errMsg);
+            }
+            return {
+              ...c,
+              messages: newMsgs,
+              updated_at: new Date().toISOString(),
+            };
+          });
+        });
+      })
+      .finally(function () {
+        setIsSending(false);
+        setRetrying(false);
       });
-      setIsSending(false);
-      setRetrying(false);
-    }, 1400);
   }
 
   function handleKeyDown(e) {

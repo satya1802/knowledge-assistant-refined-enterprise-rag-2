@@ -25,6 +25,19 @@ SERVICES = {
     "gemini-api": "GEMINI_API_KEY",
 }
 
+
+class GeminiUnavailableError(Exception):
+    """Raised when the Gemini API cannot answer a chat question.
+
+    Covers a missing/invalid API key, a quota failure, and any other error
+    the ``google.generativeai`` SDK raises during embedding creation or
+    answer generation (AC-072). ``app.routers.chat`` catches this and turns
+    it into the ``CHAT_GEMINI_UNAVAILABLE`` error response instead of an
+    unhandled 500 -- no persisted data is touched when this is raised, so
+    documents, chunks, embeddings, chat history, and users remain intact.
+    """
+
+
 # ``chunks.embedding`` is a ``Vector(768)`` column (see app.processing), so
 # every question embedding must match that dimension to be compared against it.
 _EMBEDDING_DIMENSION = 768
@@ -80,10 +93,11 @@ def _normalise_model_name(model_name: str) -> str:
 
 
 def _require_api_key() -> str:
-    """Return the configured Gemini API key, or raise if it is missing."""
+    """Return the configured Gemini API key, or raise ``GeminiUnavailableError``
+    if it is missing (AC-072: surfaced as a clear error, not a crash)."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or not api_key.strip():
-        raise RuntimeError(
+        raise GeminiUnavailableError(
             "Gemini API key (GEMINI_API_KEY) is not configured. "
             "Set the GEMINI_API_KEY environment variable to use the RAG chat flow."
         )
@@ -105,20 +119,26 @@ def embed_question(question: str, db: Session) -> list[float]:
 
     Reads ``Settings.gemini_embedding_model`` at call time (never cached) so
     a change made via ``PATCH /settings`` applies to the very next question.
-    Raises ``RuntimeError`` when ``GEMINI_API_KEY`` is missing, and propagates
-    any other Gemini API error -- callers decide how to degrade.
+    Raises ``GeminiUnavailableError`` when ``GEMINI_API_KEY`` is missing or
+    the Gemini API returns an error or quota failure (AC-072); no data is
+    written before this can happen, so nothing persisted is at risk.
     """
     settings = get_current_settings(db)
     model_ref = _normalise_model_name(settings.gemini_embedding_model)
     api_key = _require_api_key()
 
-    genai.configure(api_key=api_key)
-    result = genai.embed_content(
-        model=model_ref,
-        content=question,
-        task_type="RETRIEVAL_QUERY",
-        output_dimensionality=_EMBEDDING_DIMENSION,
-    )
+    try:
+        genai.configure(api_key=api_key)
+        result = genai.embed_content(
+            model=model_ref,
+            content=question,
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=_EMBEDDING_DIMENSION,
+        )
+    except GeminiUnavailableError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — any Gemini SDK error (AC-072)
+        raise GeminiUnavailableError(f"Gemini embedding creation failed: {exc}") from exc
     return result["embedding"]
 
 
@@ -168,7 +188,9 @@ def generate_grounded_answer(question: str, chunks: list[Chunk], db: Session) ->
     """Call Gemini with the retrieved *chunks* as context so the answer is
     grounded in them (AC-065) rather than fabricated (AC-067).
 
-    Reads ``Settings.gemini_answer_model`` at call time.
+    Reads ``Settings.gemini_answer_model`` at call time. Raises
+    ``GeminiUnavailableError`` on any Gemini API error or quota failure
+    (AC-072) rather than letting it crash the request.
     """
     settings = get_current_settings(db)
     model_ref = _normalise_model_name(settings.gemini_answer_model)
@@ -183,24 +205,35 @@ def generate_grounded_answer(question: str, chunks: list[Chunk], db: Session) ->
         f"Question: {question}\n\nAnswer:"
     )
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_ref)
-    response = model.generate_content(prompt)
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_ref)
+        response = model.generate_content(prompt)
+    except GeminiUnavailableError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — any Gemini SDK error (AC-072)
+        raise GeminiUnavailableError(f"Gemini answer generation failed: {exc}") from exc
     return response.text
 
 
 def generate_fallback_answer(question: str, db: Session) -> str:
     """Call Gemini with no retrieved context (no chunk met the cosine
     threshold). Used for the fallback branch of AC-065; callers attach no
-    citations to a fallback answer (AC-067).
+    citations to a fallback answer (AC-067). Raises ``GeminiUnavailableError``
+    on any Gemini API error or quota failure (AC-072).
     """
     settings = get_current_settings(db)
     model_ref = _normalise_model_name(settings.gemini_answer_model)
     api_key = _require_api_key()
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_ref)
-    response = model.generate_content(question)
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_ref)
+        response = model.generate_content(question)
+    except GeminiUnavailableError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — any Gemini SDK error (AC-072)
+        raise GeminiUnavailableError(f"Gemini fallback answer generation failed: {exc}") from exc
     return response.text
 
 
@@ -215,15 +248,17 @@ def answer_chat_question(conversation: Conversation, question: str, db: Session)
     attached to a fallback answer), persists the assistant's ``Message`` and
     its ``Citation`` rows, and returns the assistant ``Message`` with
     ``citations`` eagerly loaded.
+
+    Raises ``GeminiUnavailableError`` when the Gemini API returns an error or
+    quota failure while embedding the question or generating the answer
+    (AC-072); nothing is committed in that case, so no partial message or
+    citation is left behind and every already-persisted row is untouched.
     """
     db.add(Message(conversation_id=conversation.id, role="user", content=question))
     db.flush()
 
-    try:
-        question_embedding = embed_question(question, db)
-        scored_chunks = retrieve_relevant_chunks(question_embedding, db)
-    except Exception:  # noqa: BLE001 — retrieval failure degrades to fallback
-        scored_chunks = []
+    question_embedding = embed_question(question, db)
+    scored_chunks = retrieve_relevant_chunks(question_embedding, db)
 
     chunks = [chunk for chunk, _score in scored_chunks]
 

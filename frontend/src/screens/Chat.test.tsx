@@ -1,16 +1,56 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+// Mock the api module so tests don't hit the network (same pattern as the
+// other screens' tests).
+vi.mock("@/lib/api", () => {
+  class ApiError extends Error {
+    status: number;
+    body: unknown;
+    constructor(message: string, status: number, body?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    apiFetch: vi.fn(),
+    ApiError,
+    API_BASE_URL: "http://localhost:8000",
+  };
+});
+
+import { apiFetch, ApiError } from "@/lib/api";
 import Chat from "@/screens/Chat";
+
+const mockedApiFetch = vi.mocked(apiFetch);
+
+// The exact wording the backend returns for a Gemini API error or quota
+// failure (app/errors.py — CHAT_GEMINI_UNAVAILABLE.detail), and the wording
+// Chat.tsx falls back to when a failure carries no such detail.
+const GEMINI_UNAVAILABLE_MESSAGE =
+  "The AI service is temporarily unavailable or has reached its quota. " +
+  "Your question and chat history have been saved -- please try again shortly.";
+
+const CHAT_PLACEHOLDER = "Ask a question about your Knowledge Base documents…";
 
 function renderScreen() {
   return render(<Chat />);
+}
+
+function typeAndSend(question: string) {
+  const textarea = screen.getByPlaceholderText(CHAT_PLACEHOLDER);
+  fireEvent.change(textarea, { target: { value: question } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  return textarea;
 }
 
 beforeEach(() => {
   // jsdom does not implement scrollIntoView; the screen calls it to keep the
   // latest message in view whenever the message list changes.
   Element.prototype.scrollIntoView = vi.fn();
+  mockedApiFetch.mockReset();
 });
 
 describe("Chat screen — citation display", () => {
@@ -121,5 +161,96 @@ describe("Chat screen — 'Not from your documents' fallback badge", () => {
     const message = screen.getByTestId("chat-message-msg-004");
     expect(within(message).getAllByTestId("citation")).toHaveLength(1);
     expect(within(message).queryByText("Not from your documents")).not.toBeInTheDocument();
+  });
+});
+
+describe("Chat screen — Gemini API error handling (AC-072)", () => {
+  // POST /chat is the only endpoint this story adds error handling around.
+  // Every test below sends through the default conversation ("Q3 Information
+  // Security Review") unless a different one is selected explicitly.
+
+  it("[AC-072] shows a clear error message when the backend reports a Gemini API or quota failure", async () => {
+    mockedApiFetch.mockRejectedValueOnce(
+      new ApiError("POST /chat failed: 503", 503, { detail: GEMINI_UNAVAILABLE_MESSAGE }),
+    );
+
+    renderScreen();
+    typeAndSend("What is our disaster recovery RTO?");
+
+    expect(await screen.findByText(GEMINI_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("[AC-072] falls back to a clear generic message when the failure carries no server detail", async () => {
+    mockedApiFetch.mockRejectedValueOnce(new Error("network error"));
+
+    renderScreen();
+    typeAndSend("Will this still work?");
+
+    expect(await screen.findByText(GEMINI_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("[AC-072] does not blank the page or drop prior messages when a Gemini error is shown", async () => {
+    mockedApiFetch.mockRejectedValueOnce(new ApiError("POST /chat failed: 503", 503, {}));
+
+    renderScreen();
+    typeAndSend("What is our disaster recovery RTO?");
+
+    await screen.findByText(GEMINI_UNAVAILABLE_MESSAGE);
+
+    // The screen (and the whole prior conversation) is still rendered, not
+    // blanked, and the question the user just asked is preserved too.
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Service accounts must use passwords of at least 20 characters/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("What is our disaster recovery RTO?")).toBeInTheDocument();
+  });
+
+  it("[AC-072] re-enables the composer after a Gemini error instead of hanging on 'Sending…'", async () => {
+    mockedApiFetch.mockRejectedValueOnce(new ApiError("POST /chat failed: 503", 503, {}));
+
+    renderScreen();
+    const textarea = typeAndSend("What is our disaster recovery RTO?") as HTMLTextAreaElement;
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    });
+    expect(textarea).not.toBeDisabled();
+  });
+
+  it("[AC-072] a retry after a Gemini error succeeds and replaces the error message in place", async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      answer: "Custom rate limits are configured per client in the gateway admin panel.",
+      is_fallback: false,
+      citations: [
+        {
+          document_id: "doc-099",
+          filename: "API_Gateway_Config.pdf",
+          page_section: "Page 9, §3.4",
+          chunk_id: "chunk-099",
+        },
+      ],
+    });
+
+    renderScreen();
+
+    // conv-003 ("API Gateway Rate Limiting") already ends on a persisted
+    // Gemini error message (msg-014) with a "Retry question" affordance.
+    fireEvent.click(
+      screen.getByRole("button", { name: /Open conversation: API Gateway Rate Limiting/ }),
+    );
+    expect(screen.getByText(/The Gemini API returned an error/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry question" }));
+
+    const messageList = screen.getByLabelText("Chat messages");
+    expect(
+      await within(messageList).findByText(
+        "Custom rate limits are configured per client in the gateway admin panel.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(messageList).queryByText(/The Gemini API returned an error/),
+    ).not.toBeInTheDocument();
   });
 });
