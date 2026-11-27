@@ -69,3 +69,57 @@ describe("Chat screen — citation display", () => {
     expect(within(message).queryAllByTestId("citation")).toHaveLength(0);
   });
 });
+
+describe("Chat screen — 'Not from your documents' fallback badge", () => {
+  // msg-006 (in the seeded "Q3 Information Security Review" conversation,
+  // selected by default) is a fallback answer: no relevant chunks were found,
+  // so Gemini answered from general knowledge.
+
+  it("[AC-070] shows the 'Not from your documents' badge alongside the fallback answer", () => {
+    renderScreen();
+
+    const message = screen.getByTestId("chat-message-msg-006");
+    expect(within(message).getByText("Not from your documents")).toBeInTheDocument();
+  });
+
+  it("[AC-070] renders the badge as a visually distinct, clearly visible element rather than plain text", () => {
+    renderScreen();
+
+    const message = screen.getByTestId("chat-message-msg-006");
+    const badgeText = within(message).getByText("Not from your documents");
+    const badge = badgeText.closest("div");
+
+    // Visible to the user...
+    expect(badge).toBeVisible();
+    // ...and set apart from the surrounding answer text by its own bordered,
+    // colored container, not just inline wording within the answer.
+    expect(badge?.style.border).toBeTruthy();
+    expect(badge?.style.backgroundColor).toBeTruthy();
+    expect(badge).not.toBe(message);
+  });
+
+  it("[AC-070] does not show the fallback badge alongside a grounded answer", () => {
+    renderScreen();
+
+    // msg-002 is a grounded answer backed by real citations — it must not
+    // carry the fallback badge.
+    const message = screen.getByTestId("chat-message-msg-002");
+    expect(within(message).queryByText("Not from your documents")).not.toBeInTheDocument();
+  });
+
+  it("[AC-071] shows no citations alongside the fallback answer carrying the badge", () => {
+    renderScreen();
+
+    const message = screen.getByTestId("chat-message-msg-006");
+    expect(within(message).getByText("Not from your documents")).toBeInTheDocument();
+    expect(within(message).queryAllByTestId("citation")).toHaveLength(0);
+  });
+
+  it("[AC-071] still shows real citations for a grounded answer, unaffected by fallback handling", () => {
+    renderScreen();
+
+    const message = screen.getByTestId("chat-message-msg-004");
+    expect(within(message).getAllByTestId("citation")).toHaveLength(1);
+    expect(within(message).queryByText("Not from your documents")).not.toBeInTheDocument();
+  });
+});
