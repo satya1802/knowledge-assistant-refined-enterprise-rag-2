@@ -76,6 +76,26 @@ def get_current_settings(db: Session) -> Settings:
 
 
 # ---------------------------------------------------------------------------
+# Conversations (US-026): create
+# ---------------------------------------------------------------------------
+
+
+def create_conversation(user_id: int, title: str | None, db: Session) -> Conversation:
+    """Create and persist a new conversation owned by *user_id* (AC-074).
+
+    *title* is an optional free-text label; blank/whitespace-only values are
+    stored as ``None`` rather than an empty string so the frontend can tell
+    "no title given" from "titled with spaces".
+    """
+    stripped_title = title.strip() if title else None
+    conversation = Conversation(user_id=user_id, title=stripped_title or None)
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+# ---------------------------------------------------------------------------
 # RAG chat (US-023): retrieval, grounded answer, citations
 # ---------------------------------------------------------------------------
 

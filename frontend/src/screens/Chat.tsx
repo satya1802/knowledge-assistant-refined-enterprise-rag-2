@@ -438,6 +438,14 @@ export default function Screen() {
   var retrying = retryingState[0];
   var setRetrying = retryingState[1];
 
+  var creatingConversationState = React.useState(false);
+  var creatingConversation = creatingConversationState[0];
+  var setCreatingConversation = creatingConversationState[1];
+
+  var createConversationErrorState = React.useState(null);
+  var createConversationError = createConversationErrorState[0];
+  var setCreateConversationError = createConversationErrorState[1];
+
   var messagesEndRef = React.useRef(null);
   var inputRef = React.useRef(null);
 
@@ -469,22 +477,43 @@ export default function Screen() {
     setDeleteConfirmId(null);
   }
 
+  // Start a new question-and-answer thread by creating the conversation
+  // record on the server (POST /conversations) rather than only adding it to
+  // local state, so the thread the user starts here is the one the backend
+  // persists and associates with their user ID (AC-074).
   function handleCreateConversation() {
-    var newId = "conv-" + Date.now();
-    var now = new Date().toISOString();
-    var newConv = {
-      id: newId,
-      title: "New Conversation",
-      created_at: now,
-      updated_at: now,
-      messages: [],
-    };
-    setConversations([newConv].concat(conversations));
-    setSelectedId(newId);
-    setDeleteConfirmId(null);
-    setTimeout(function () {
-      if (inputRef.current) inputRef.current.focus();
-    }, 50);
+    if (creatingConversation) return;
+
+    setCreatingConversation(true);
+    setCreateConversationError(null);
+
+    apiFetch("/conversations", {
+      method: "POST",
+      body: JSON.stringify({}),
+    })
+      .then(function (data) {
+        var newConv = {
+          id: data.id,
+          title: data.title || "New Conversation",
+          created_at: data.created_at,
+          updated_at: data.created_at,
+          messages: [],
+        };
+        setConversations(function (prev) {
+          return [newConv].concat(prev);
+        });
+        setSelectedId(newConv.id);
+        setDeleteConfirmId(null);
+        setTimeout(function () {
+          if (inputRef.current) inputRef.current.focus();
+        }, 50);
+      })
+      .catch(function () {
+        setCreateConversationError("Failed to create conversation. Please try again.");
+      })
+      .finally(function () {
+        setCreatingConversation(false);
+      });
   }
 
   function handleDeleteConversation(id) {
@@ -1062,6 +1091,8 @@ export default function Screen() {
               {
                 size: "sm",
                 onClick: handleCreateConversation,
+                disabled: creatingConversation,
+                "aria-busy": creatingConversation,
                 style: {
                   fontSize: "12px",
                   padding: "4px 10px",
@@ -1071,9 +1102,35 @@ export default function Screen() {
                 },
               },
               React.createElement(Icons.Plus, { size: 13 }),
-              "New",
+              creatingConversation ? "Creating…" : "New",
             ),
           ),
+          createConversationError
+            ? React.createElement(
+                "div",
+                {
+                  style: {
+                    marginBottom: "10px",
+                    padding: "8px 10px",
+                    borderRadius: brand.radius,
+                    backgroundColor: "rgba(220, 38, 38, 0.06)",
+                    border: "1px solid rgba(220, 38, 38, 0.2)",
+                    fontSize: "12px",
+                    color: "#dc2626",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "6px",
+                  },
+                  role: "alert",
+                },
+                React.createElement(Icons.AlertCircle, {
+                  size: 14,
+                  "aria-hidden": "true",
+                  style: { flexShrink: 0, marginTop: "1px" },
+                }),
+                React.createElement("span", null, createConversationError),
+              )
+            : null,
           React.createElement(
             "div",
             { style: { position: "relative" } },

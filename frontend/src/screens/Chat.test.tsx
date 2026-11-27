@@ -164,6 +164,66 @@ describe("Chat screen — 'Not from your documents' fallback badge", () => {
   });
 });
 
+describe("Chat screen — create conversation (AC-074)", () => {
+  // Clicking "New" must create the conversation on the server (POST
+  // /conversations) rather than only adding it to local state, so the
+  // thread is actually associated with the authenticated user's ID.
+
+  it("[AC-074] calls POST /conversations when 'New' is clicked", async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      id: "11111111-1111-1111-1111-111111111111",
+      title: null,
+      created_at: "2026-11-27T12:00:00Z",
+    });
+
+    renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    expect(mockedApiFetch).toHaveBeenCalledWith(
+      "/conversations",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    // Let the resolved promise's state updates settle before the test ends.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "New" })).not.toBeDisabled();
+    });
+  });
+
+  it("[AC-074] adds the conversation detail the server returns and selects it", async () => {
+    const newId = crypto.randomUUID();
+    mockedApiFetch.mockResolvedValueOnce({
+      id: newId,
+      title: null,
+      created_at: "2026-11-27T12:00:00Z",
+    });
+
+    renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    const list = screen.getByLabelText("Conversation list");
+    const newItem = await within(list).findByRole("button", {
+      name: /Open conversation: New Conversation, 0 messages/,
+    });
+
+    // The newly created conversation (identified by the server-returned id
+    // via its aria-current state) becomes the selected conversation.
+    expect(newItem).toHaveAttribute("aria-current", "true");
+  });
+
+  it("[AC-074] shows a clear error and leaves the composer usable when creation fails", async () => {
+    mockedApiFetch.mockRejectedValueOnce(new ApiError("POST /conversations failed: 500", 500, {}));
+
+    renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    expect(
+      await screen.findByText("Failed to create conversation. Please try again."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New" })).not.toBeDisabled();
+  });
+});
+
 describe("Chat screen — Gemini API error handling (AC-072)", () => {
   // POST /chat is the only endpoint this story adds error handling around.
   // Every test below sends through the default conversation ("Q3 Information
